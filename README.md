@@ -13,8 +13,27 @@
 - ✅ **分类自动映射** — 输入关键词自动 suggest 分类
 - ✅ **月度汇总报告** — Dataview 自动生成
 - ✅ **主仪表盘** — 本月余额/分类占比/趋势
+- 🤖 **AI Agent 支持** — 自然语言记账，自动创建交易文件（见 `AGENTS.md`）
 - 📅 **多币种汇率换算**（v1.1）
 - 🏦 **银行 API 自动同步**（v2.0）
+
+---
+
+## 🤖 AI Agent 使用
+
+本系统主要面向 **AI Agent**（Claude/Hermes 等 LLM），用户用自然语言描述一笔交易，AI Agent 自动：
+
+1. 解析意图（支出/收入）、日期、金额、币种
+2. 匹配账户和分类（根据 `QUICK-REFERENCE.md` 映射表）
+3. 在 `Transactions/` 目录下创建对应 md 文件
+
+**示例：**
+
+用户 → `"今天午餐沙县花了45元，支付宝付款"`
+
+AI Agent → 自动创建 `Transactions/expenses/2026-06-01-lunch-45-CNY-ACTIVE.md`
+
+详见：[AGENTS.md](AGENTS.md) · [QUICK-REFERENCE.md](QUICK-REFERENCE.md)
 
 ---
 
@@ -22,21 +41,23 @@
 
 ```
 obsidian-personal-finance-tracker/
+├── AGENTS.md                       # 🤖 AI Agent 使用指南（核心）
+├── QUICK-REFERENCE.md             # 📋 AI Agent 快速参考（结构化映射表）
 ├── Templates/
-│   ├── expense-template.md      # Templater 交互录入支出
-│   └── income-template.md      # Templater 交互录入收入
+│   ├── expense-template.md        # Templater 交互录入支出（人类使用）
+│   └── income-template.md        # Templater 交互录入收入（人类使用）
 ├── Transactions/
-│   ├── expenses/                # 支出文件（每笔一个 md）
-│   └── incomes/                 # 收入文件
+│   ├── expenses/                  # 支出文件（AI Agent 创建）
+│   └── incomes/                   # 收入文件（AI Agent 创建）
 ├── Dashboards/
-│   └── finance-dashboard.md     # 主仪表盘
+│   └── finance-dashboard.md      # 主仪表盘（Dataview）
 ├── Accounts/
-│   └── account-list.md          # 账户列表（含初始余额）
+│   └── account-list.md            # 账户列表（含初始余额）
 ├── Categories/
-│   ├── expense-categories.md     # 支出分类定义
-│   ├── income-categories.md      # 收入分类定义
-│   ├── expense-category-rules.md # 支出分类自动映射规则
-│   └── income-category-rules.md  # 收入分类自动映射规则
+│   ├── expense-categories.md      # 支出分类定义
+│   ├── expense-category-rules.md # 支出分类关键词映射表
+│   ├── income-categories.md       # 收入分类定义
+│   └── income-category-rules.md  # 收入分类关键词映射表
 └── README.md
 ```
 
@@ -44,151 +65,93 @@ obsidian-personal-finance-tracker/
 
 ## 🚀 快速开始
 
-### 1. 环境要求
+### AI Agent 接入（推荐）
 
-- **Obsidian**（v1.0+）
-- **Dataview** 插件（必须）
-- **Templater** 插件（必须）
+1. 将本仓库克隆到本地（或将文件复制到 Obsidian vault）
+2. AI Agent 读取 `AGENTS.md` 了解工作流程
+3. AI Agent 参考 `QUICK-REFERENCE.md` 快速查找分类/账户映射
+4. 用户用自然语言描述交易，AI Agent 自动创建文件
 
-### 2. 安装
+### 人类手动录入
 
-1. 克隆本仓库到本地：
-   ```bash
-   git clone https://github.com/<YOUR_GITHUB_USERNAME>/obsidian-personal-finance-tracker.git
-   ```
-
-2. 将 `Templates/`、`Transactions/`、`Dashboards/`、`Accounts/`、`Categories/` 文件夹复制到你的 Obsidian vault 根目录
-
-3. 在 Obsidian 中安装并启用 **Dataview** 和 **Templater** 插件
-
-4. 配置 Templater：
-   - 设置模板文件夹路径为 `Templates/`
-   - 启用 "Create new note from template" 命令
-
-### 3. 快速上手
-
-1. 在 Obsidian 中按 `Ctrl/Cmd + P`，输入 `Templater: Create new note from template`
-2. 选择 `expense-template.md` 录入支出，或 `income-template.md` 录入收入
-3. 打开 `Dashboards/finance-dashboard.md` 查看财务概况
+1. 在 Obsidian 中安装 **Dataview** 和 **Templater** 插件
+2. 复制 `Templates/`、`Dashboards/`、`Accounts/`、`Categories/` 到 vault
+3. 用 Templater 创建新笔记 → 选择 `expense-template.md` 或 `income-template.md`
+4. 打开 `Dashboards/finance-dashboard.md` 查看财务概况
 
 ---
 
-## 📖 使用指南
+## 📖 AI Agent 工作流
 
-### 记录支出
+```
+用户自然语言 → AI Agent 解析 → 匹配分类/账户 → 创建 md 文件 → 仪表盘自动更新
+```
 
-1. 使用 Templater 创建新笔记 → 选择 `expense-template.md`
-2. 系统会提示输入：日期（默认当天）、金额、币种、账户、支付方式、备注
-3. **分类自动映射**：在备注中输入关键词（如"午餐"、"地铁"），系统自动推荐分类
-4. 文件自动保存到 `Transactions/expenses/`，命名为 `YYYY-MM-DD-描述-金额-CURRENCY-ACTIVE.md`
+AI Agent 处理步骤：
 
-### 记录收入
-
-同上，选择 `income-template.md`
-
-### 查看仪表盘
-
-打开 `Dashboards/finance-dashboard.md`，包含：
-- 本月收入/支出/余额汇总
-- 各账户当前余额
-- 支出/收入分类分布
-- 最近 10 笔交易
-
-### 自定义分类映射
-
-编辑 `Categories/expense-category-rules.md`（支出）或 `Categories/income-category-rules.md`（收入），添加/修改关键词 → 分类映射规则。
-
-### 添加新账户
-
-编辑 `Accounts/account-list.md`，在账户表格中添加新行，并更新 Dataview 查询中的初始余额映射。
+1. **判断 type**：支出（"花了","买了"）→ `expense`，收入（"收到","进账"）→ `income`
+2. **提取 date**：`今天` → `2026-06-01`，`昨天` → `2026-05-31`
+3. **提取 amount + currency**：`45元` → `amount=45, currency=CNY`
+4. **匹配 account**：支付工具 → `Alipay`/`WeChat Pay`/`CMB` 等
+5. **匹配 category**：根据 note 关键词查 `QUICK-REFERENCE.md` 分类表
+6. **生成文件名**：`{date}-{description}-{amount}-{currency}-ACTIVE.md`
+7. **创建文件**：写入 `Transactions/expenses/` 或 `Transactions/incomes/`
 
 ---
 
-## 🔧 分类自动映射规则
-
-当你在备注中输入特定关键词时，系统会自动 suggest 对应分类：
-
-| 关键词 | 映射分类 |
-|--------|---------|
-| 午餐, 晚餐, 早餐, 外卖, 餐厅... | Food 🍔 |
-| 地铁, 公交, 打车, 停车... | Transport 🚌 |
-| 淘宝, 京东, 购物, 超市... | Shopping 🛍️ |
-| 电影, 游戏, 音乐, 视频... | Entertainment 🎮 |
-| 工资, 月薪, 薪资 | Salary 💰 |
-| 兼职, 外快, 接单 | Freelance 💻 |
-
-完整规则见：
-- `Categories/expense-category-rules.md`
-- `Categories/income-category-rules.md`
-
----
-
-## 📊 仪表盘说明
-
-### 主仪表盘（Finance Dashboard）
-
-展示内容：
-- **本月概要**：收入总额 / 支出总额 / 余额
-- **各账户当前余额**（Dataview JS 自动计算）
-- **支出分类分布**（GROUP BY category）
-- **收入分类分布**
-- **最近交易**
-- **多币种分开统计**
-
-### 月度报告
-
-Dataview 实时查询，无需预生成。打开 `Dashboards/finance-dashboard.md` 即可看到当月数据。
-
----
-
-## 🛠️ 插件依赖
+## 🛠️ 插件依赖（人类手动录入）
 
 | 插件 | 必须 | 说明 |
 |------|------|------|
 | Dataview | ✅ | 查询和渲染仪表盘 |
-| Templater | ✅ | 交互式录入模板 |
+| Templater | ✅ | 交互式录入模板（人类使用） |
 | Commander | ❌ | 快捷命令（可选） |
 | Obsidian Charts | ❌ | 趋势图展示（可选） |
 
 ---
 
-## 🗂️ 文件命名规范
+## 📋 AI Agent 快速参考
 
-### 交易文件
+### 支出分类
 
-格式：`YYYY-MM-DD-{描述}-{金额}-{CURRENCY}-{STATUS}.md`
+| 分类 | 关键词 |
+|------|--------|
+| Food 🍔 | 午餐、晚餐、外卖、餐厅、沙县 |
+| Transport 🚌 | 地铁、公交、打车、滴滴 |
+| Shopping 🛍️ | 淘宝、京东、拼多多、超市 |
+| Entertainment 🎮 | 电影、游戏、音乐、会员 |
+| Health 💊 | 医院、药店、体检 |
+| Education 📚 | 课程、书籍、培训 |
+| Housing 🏠 | 房租、物业、水电 |
+| Communication 📱 | 手机、话费、宽带 |
+| Gift 🎁 | 红包、礼物、请客 |
+| Travel ✈️ | 机票、酒店、旅游 |
+| Investment 💹 | 理财、基金、股票 |
+| Other ❓ | 其他 |
 
-示例：
-- `2026-06-01-lunch-45-CNY-ACTIVE.md`（支出）
-- `2026-06-01-salary-15000-CNY-ACTIVE.md`（收入）
+### 收入分类
 
-### 状态说明
+| 分类 | 关键词 |
+|------|--------|
+| Salary 💰 | 工资、月薪、底薪 |
+| Bonus 🎉 | 年终奖、奖金、绩效 |
+| Freelance 💻 | 兼职、外快、接单 |
+| Investment 📈 | 理财利息、投资收益 |
+| Refund 🔄 | 退款、退货、补偿 |
+| Gift 🎁 | 红包、礼金 |
+| Other ❓ | 其他 |
 
-| 状态 | 说明 |
-|------|------|
-| ACTIVE | 活跃记录 |
-| ARCHIVED | 已归档 |
-| DELETED | 已删除（不计入统计） |
+### 账户
 
----
-
-## 📝 自定义指南
-
-### 添加新分类
-
-1. 编辑 `Categories/expense-categories.md` 或 `Categories/income-categories.md`
-2. 在表格中添加新分类行
-3. 在对应的 `-category-rules.md` 中添加关键词映射
-
-### 添加新账户
-
-1. 编辑 `Accounts/account-list.md`
-2. 在账户表格中添加新行
-3. 在 `account-list.md` 的 Dataview JS 中添加新账户的初始余额
-
-### 修改默认币种
-
-编辑 `Templates/expense-template.md` 和 `Templates/income-template.md`，将 `currency` 默认值改为你需要的币种。
+| 账户 | 关键词 |
+|------|--------|
+| Alipay | 支付宝 |
+| WeChat Pay | 微信、微信支付 |
+| CMB | 招行、招商银行 |
+| ICBC | 工行、工商银行 |
+| Credit Card | 信用卡 |
+| Cash | 现金 |
+| USD Account | 美元账户 |
 
 ---
 
