@@ -12,7 +12,7 @@
 |------------|------------|
 | 用户说"记一笔账"才工作 | 用户没说话也定期检查数据健康 |
 | 等用户问"我这个月花了多少" | 主动说"你餐饮超预算 20%" |
-| 用户配定时任务 | Agent 主动问"要不要我帮你配每日校验" |
+| 用户配定时任务 | **Agent 帮用户配** (生成 plist/cron, 用户复制粘贴) |
 | 用户配通知渠道 | Agent 用自己已有的通道主动推送告警 |
 | 用户发现错误 | Agent 提前发现并提示 |
 
@@ -85,28 +85,62 @@ accounts:
 ---
 ```
 
-### 步骤 4: 配置校验策略
+### 步骤 4: 配置定时任务 (V1.1 升级版)
 
-**核心问题**: 谁来跑 daily check? 怎么通知?
+**核心问题**: 谁负责把校验/提醒跑起来? Agent 必须主动帮用户配定时任务, 因为 Agent 关闭会话后就不能主动提醒了。
 
 ```
-Agent: "我建议配每日定时校验保证数据健康, 三个选项:
+Agent: "我帮你配 5 个定时任务, 跑校验 + 提醒。要不要我帮你生成 launchd plist / crontab?
+  你只要复制粘贴到终端就行。
 
-  选项 A: 我来配 (推荐)
-    - 我帮你设一个每天早上 6 点的提醒
-    - 校验失败时我**主动**用我自己的通道 (飞书/微信) 通知你
-    - 你不用动任何配置
+  - 每日 18:00  跑 daily_integrity_check.py (含 #33 频率检测、#34 账户遗忘)
+  - 每周日 20:00  跑 weekly_summary.py (#35 周末复盘)
+  - 每月最后一日 21:00  跑 monthly_summary.py (#36 月末自检)
+  - 每日 8:00   跑 credit_card_reminder.py (#23 信用卡还款)
+  - 每日 8:05   跑 installment_check.py (#24 分期到期)
 
-  选项 B: 你自己配 cron
-    - 命令我告诉你
-    - 通知走 alerts.md 文件
-
-  选项 C: 不配
-    - 每次你让我记账时, 我自动跑单笔校验
-    - 适合记账频率低的用户
+  不配的话, 校验/提醒只在咱俩对话时跑——你不开会话, 我就不能主动提醒你。"
 ```
 
-**选项 A 推荐**。Agent 用 cron (`hermes cronjob create` 或类似) 配每日任务。
+**为什么必须配定时任务**:
+- Agent 只在**用户开会话**时在线, 关掉会话 Agent 就"睡"了
+- 想让 Agent 主动提醒 ("该还款了"/"今天没记账"), 必须在**指定时间被唤醒**——只有系统定时任务能保证
+- Agent 的责任是**主动帮用户配** (生成 plist/cron, 用户复制粘贴), 不是"绕开"定时任务
+
+**生成 plist 示例 (macOS launchd)**:
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key><string>com.user.finance-daily-check</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/python3</string>
+        <string>/Users/你的用户名/Project/obsidian-personal-finance-tracker/scripts/daily_integrity_check.py</string>
+    </array>
+    <key>StartCalendarInterval</key>
+    <dict><key>Hour</key><integer>18</integer><key>Minute</key><integer>0</integer></dict>
+    <key>StandardOutPath</key><string>/tmp/finance-daily.log</string>
+    <key>StandardErrorPath</key><string>/tmp/finance-daily.err</string>
+</dict>
+</plist>
+```
+
+保存到 `~/Library/LaunchAgents/com.user.finance-daily-check.plist`, 然后:
+```bash
+launchctl load ~/Library/LaunchAgents/com.user.finance-daily-check.plist
+```
+
+**配置存到 agent-config.md** (用户可见、可改):
+```yaml
+scheduled_tasks:
+  daily_18_integrity: enabled      # daily_integrity_check.py
+  weekly_sun_20_summary: enabled   # weekly_summary.py
+  monthly_last_21_summary: enabled # monthly_summary.py
+  daily_08_credit_card: enabled    # credit_card_reminder.py
+  daily_0805_installment: enabled  # installment_check.py
+```
 
 ### 步骤 5: 配置通知偏好
 
@@ -207,7 +241,8 @@ Agent: "早上好! 数据健康, 上次校验 12 小时前通过。
 | **每月** | 1 号 | Agent 主动给上月总结 + 预算建议 |
 | **异常** | 即时 | 任何校验失败 → 主动通知 |
 
-**注意**: Agent 跑 daily check 不依赖系统 cron。Agent 自己在会话开始时判断"是不是该跑了", 是就跑。
+**注意**: Agent 跑 daily/weekly/monthly 任务**必须**依赖系统 cron/launchd, 否则 Agent 关掉会话就不提醒了。
+Agent 的责任是**主动帮用户配** (生成 plist/cron, 用户复制粘贴), 不是"绕开"定时任务。
 
 ### D. 主动建议场景
 
@@ -222,6 +257,149 @@ Agent: "早上好! 数据健康, 上次校验 12 小时前通过。
 | 出现未分类交易 | "有 1 笔没分类的支出, 要不要补一下?" |
 
 **原则**: 主动给洞察, 不主动做决定 (比如不要主动删除交易)。
+
+---
+
+## 🆕 V1.1 新增的 6 个主动行为
+
+V1.0 阶段定义了"主动"的原则, V1.1 把它落地成 6 个**具体可调用的脚本 + Agent 责任**。每段都是"触发 → Agent 行为 → 边界 → 失败兜底"四件套。
+
+### F. #23 信用卡还款提醒 — `credit_card_reminder.py`
+
+**触发**: 用户配置每日 8:00 定时任务 (Agent 帮生成 launchd plist, 复制粘贴即用)。
+
+**Agent 责任**:
+1. **首次 Onboarding 时** (SKILL.md 步骤 3 扩展): 询问每张信用卡的 `statement_day` + `payment_due_day`, 写入 `Accounts/account-list.md` 的 frontmatter
+2. **每天定时任务触发后**: 读 `alerts.md`, 把 WARN 级别的"X 卡 3 天后还款"用自己通道 (飞书/微信) 主动推给用户
+3. **逾期 (ERROR)** 立即推 (不等用户问)
+
+**脚本做什么**:
+- 扫 `Accounts/account-list.md` 找 `type: credit` 的账户
+- 对每张卡算下次出账日 + 还款日 (处理跨月/月末)
+- 还款日 ≤ 5 天 → WARN, 已过 → ERROR
+- 写到 `alerts.md`
+
+**边界**:
+- ❌ 不要自动还款 (那是银行 App 的事)
+- ❌ 不要修改用户的卡片信息
+- ✅ 只读 + 提醒
+
+**失败兜底**:
+- 找不到 `statement_day`/`payment_due_day` → INFO 提示用户补字段 (软告警, 不阻塞)
+- `alerts.md` 写失败 → 桌面通知 + 日志
+
+---
+
+### G. #24 分期完整性检查 — `installment_check.py` + `installment_helper.py`
+
+**触发**: 用户写完第一期 expense 后 (调 helper) + 每日 8:05 定时 (调 check)。
+
+**Agent 责任**:
+1. **用户说"我买了 iPhone 24 期每月 500"**: Agent 先写第一期 expense, 立即调 `installment_helper.py create --first-file <第一期> --total 24`, 自动生成剩余 23 期 PENDING 模板
+2. **每天 8:05**: 调 `installment_check.py`, 扫所有分期组
+3. **发现 PENDING 到期 (今天 ≥ 该扣款日)**: 主动问"iPhone 第 5 期今天该扣了, 我帮你改 status=ACTIVE 吗?"
+4. **发现分期组缺期 / 字段不一致**: ERROR 告警
+
+**脚本做什么**:
+- `helper`: 从第一期 frontmatter 复制 amount/currency/account/category, 生成 N-1 个 PENDING 模板, 日期递增
+- `check`: 按 `installment_group_id` 分组, 校验 ① 总期数 ② 字段一致性 ③ PENDING 是否到期 ④ 孤立分期 (只有 1 期但标记分期)
+
+**边界**:
+- ❌ 不要自动把 PENDING 改 ACTIVE (扣款真的发生了吗? 需用户确认)
+- ❌ 不要补缺失的期 (用户可能主动停止分期, 不能擅自生成)
+- ✅ 只检查 + 提醒
+
+**失败兜底**:
+- 第一期 frontmatter 缺 `installment_group_id` → helper 自动生成 `INS-{date}-{account}-{amount}`
+- 缺期 → ERROR 列出缺的期号, 用户决定补还是删
+
+---
+
+### H. #33 记账频率检测 — 嵌入 `daily_integrity_check.py`
+
+**触发**: 每天 18:00 定时 (与 daily check 一起跑)。
+
+**Agent 责任**:
+1. 读脚本输出, 看有没有"过去 7 天 0 笔交易" (但账户余额非零) 的 WARN
+2. 主动推: "你过去 7 天 0 笔记账, 但账户余额 X, 要不要打开银行 App 核对?"
+3. 周末 (周六/周日) 不推 (避免打扰)
+
+**脚本做什么** (实际实现, 在 `daily_integrity_check.py:check_bookkeeping_frequency`):
+- 扫过去 7 天 ACTIVE 交易
+- 0 笔 + 至少 1 个账户有非零余额 → WARN (可能漏记)
+- 否则 INFO 输出"7 天记账: N 笔 / 活跃 M 天"
+
+**边界**:
+- ❌ 不要自动建占位交易
+- ❌ 节假日/出差不要推 (识别不了, 推了用户自己 ignore)
+
+---
+
+### I. #34 账户遗忘检测 — 嵌入 `daily_integrity_check.py`
+
+**触发**: 每天 18:00 定时 (与 daily check 一起跑)。
+
+**Agent 责任**:
+1. 读脚本输出, 看有没有"某账户 N 天没动" (N>14) 的 WARN
+2. 主动推: "招行储蓄卡已 18 天无变动, 这个账户还在用吗?"
+3. 现金账户/低频账户可豁免 (用户标记 `low_frequency: true`)
+
+**脚本做什么** (实际实现, 在 `daily_integrity_check.py:check_account_inactivity`):
+- 按账户聚合最后 ACTIVE 交易日期 (含 transfer 端)
+- 距今 > 14 天 → WARN ("账户 X 已 N 天无变动, 这个账户还在用吗?")
+- 标记 `low_frequency: true` 的账户跳过
+
+**边界**:
+- ❌ 不要自动归档"遗忘"账户
+- ✅ 只提醒
+
+---
+
+### J. #35 周末复盘 — `weekly_summary.py`
+
+**触发**: 每周日 20:00 定时任务 (Agent 帮配)。
+
+**Agent 责任**:
+1. 定时触发后, 读 `alerts.md` 拿本周汇总
+2. 主动推飞书/微信: "本周你记了 23 笔, 餐饮 ¥820 (上周 ¥1,200, 降 32%), 整体不错!"
+3. 用户问"上周花了多少" 时, 直接调脚本 (不依赖定时)
+
+**脚本做什么**:
+- 范围: 本周一 00:00 ~ 本周日 23:59
+- 输出: 笔数 / 总支出 / 总收入 / 分类前 3 / 账户余额变化 / vs 上周同比
+- 写到 `alerts.md`
+
+**边界**:
+- ❌ 不要给"省钱建议" (Agent 是记账管家, 不是理财顾问)
+- ✅ 给数据 + 给对比
+
+**失败兜底**:
+- 本周 0 笔 → 仍输出空周报 (笔数=0), 不报错
+
+---
+
+### K. #36 月末自检 — `monthly_summary.py`
+
+**触发**: 每月最后一日 21:00 定时任务 (Agent 帮配)。
+
+**Agent 责任**:
+1. 定时触发后, 读 `alerts.md`
+2. 主动推: "本月 87 笔, 支出 ¥8,200 / 收入 ¥15,000, 储蓄率 45%, 比上月 +5pp"
+3. 月初 (1 号) 也跑一次 (补上月末没跑的情况), 覆盖范围: 上月整月
+4. 用户说"3 月花了多少" → 调脚本 `--month 2026-03`
+
+**脚本做什么**:
+- 范围: 当月 1 号 ~ 当月最后一天
+- 输出: 笔数 / 支出 / 收入 / 储蓄率 / 分类汇总 / 跨账户流量
+- 写到 `alerts.md`
+
+**边界**:
+- ❌ 不做预算建议 ("下月应该少花 10%")
+- ✅ 给数据
+
+**失败兜底**:
+- `--month` 指定月份无交易 → 仍输出空月报
+- 当月未结束 → 截止到今日 (不报错)
 
 ---
 
@@ -251,4 +429,5 @@ Agent: "早上好! 数据健康, 上次校验 12 小时前通过。
 
 ## 🔄 版本
 
+- **V1.1** (2026-06-02) — 新增 6 个主动行为 (#23 信用卡 / #24 分期 / #33 频率 / #34 账户遗忘 / #35 周末复盘 / #36 月末自检), 升级 Onboarding 步骤 4 为 5 个定时任务
 - **V1.0** (2026-06-01) — 初版, 定义 Agent 主动行为原则

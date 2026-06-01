@@ -13,6 +13,8 @@ daily_integrity_check.py - 每日完整性检查
     4. 每个账户余额变化 == 该账户所有交易的净影响 (路径A vs 路径B 自洽)
     5. 账户表里的初始余额非负且合理 (sanity check)
     6. 没有任何孤立的 transfer_pair_id (只有 out 没有 in, 或反过来)
+    7. #33 记账频率分析 (过去 7 天活跃天数 / 笔数, 漏记检测)
+    8. #34 账户遗忘检测 (距每个账户最后一笔 > 14 天报 WARN)
 """
 
 import argparse
@@ -194,6 +196,123 @@ def check_negative_balances(vault_root: str) -> list:
     return errors
 
 
+def check_bookkeeping_frequency(vault_root: str, days: int = 7) -> list:
+    """
+    #33 记账频率分析。
+
+    扫描过去 N 天 (默认 7) 的交易, 统计:
+    - 活跃天数 (有交易的不同日期数)
+    - 交易笔数
+    - 漏记检测: 如果 N 天内 0 笔, 但账户余额非零, 报 WARN
+      ("你这周没记账, 但账户余额 X, 打开银行 App 核对一下")
+    """
+    from datetime import date, timedelta
+
+    errors = []
+    today = date.today()
+    cutoff = today - timedelta(days=days)
+
+    active_dates = set()
+    tx_count = 0
+
+    for filepath in find_transaction_files(vault_root):
+        if file_status(filepath) != "ACTIVE":
+            continue
+        fm, _ = parse_frontmatter(filepath)
+        if not fm:
+            continue
+        d_str = str(fm.get("date", ""))
+        try:
+            d = date.fromisoformat(d_str)
+        except (ValueError, TypeError):
+            continue
+        if d >= cutoff:
+            active_dates.add(d)
+            tx_count += 1
+
+    if tx_count == 0:
+        # 漏记检测: 0 笔 + 账户有非零余额 = 可疑
+        balances = compute_balances(vault_root)
+        non_zero_count = sum(1 for b in balances.values() if abs(b) > 0.01)
+        if non_zero_count > 0:
+            errors.append((
+                "WARN",
+                f"过去 {days} 天 0 笔记账 (账户 {non_zero_count} 个有余额), "
+                f"建议打开银行 App 核对实际交易, 是否有漏记"
+            ))
+    else:
+        # 正常: 仅做 INFO 输出
+        pass
+
+    # 把统计写进 details 备用 (main 用)
+    errors.append((
+        "INFO",
+        f"过去 {days} 天记账: {tx_count} 笔 / 活跃 {len(active_dates)} 天"
+    ))
+    return errors
+
+
+def check_account_inactivity(vault_root: str, days: int = 14) -> list:
+    """
+    #34 账户遗忘检测。
+
+    对每个账户: 距最后一笔交易 > N 天 (默认 14) 报 WARN
+    ("账户 X 已 18 天无变动, 这个账户还在用吗?")
+    """
+    from datetime import date
+
+    errors = []
+    accounts = parse_accounts(vault_root)
+    if not accounts:
+        return errors
+
+    # 收集每个账户最后活跃日期
+    last_active = {}  # (account, currency) -> date
+    for filepath in find_transaction_files(vault_root):
+        if file_status(filepath) != "ACTIVE":
+            continue
+        fm, _ = parse_frontmatter(filepath)
+        if not fm:
+            continue
+        d_str = str(fm.get("date", ""))
+        try:
+            d = date.fromisoformat(d_str)
+        except (ValueError, TypeError):
+            continue
+
+        ccy = fm.get("currency", "CNY")
+        tx_type = fm.get("type")
+
+        if tx_type in ("expense", "income"):
+            acc = fm.get("account")
+            if acc:
+                key = (acc, ccy)
+                if key not in last_active or d > last_active[key]:
+                    last_active[key] = d
+        elif tx_type == "transfer":
+            if "/transfers/out/" in filepath:
+                acc = fm.get("from_account")
+            elif "/transfers/in/" in filepath:
+                acc = fm.get("to_account")
+            else:
+                acc = None
+            if acc:
+                key = (acc, ccy)
+                if key not in last_active or d > last_active[key]:
+                    last_active[key] = d
+
+    today = date.today()
+    for (acc, ccy), d in last_active.items():
+        gap = (today - d).days
+        if gap > days:
+            errors.append((
+                "WARN",
+                f"账户 {acc} ({ccy}) 已 {gap} 天无变动, 这个账户还在用吗?"
+            ))
+
+    return errors
+
+
 def main():
     ap = argparse.ArgumentParser(description="每日财务完整性检查")
     ap.add_argument(
@@ -211,14 +330,18 @@ def main():
     vault = os.path.abspath(os.path.expanduser(args.vault))
 
     all_errors = []
-    print("🔍 1/4 检查转账配对完整性...")
+    print("🔍 1/6 检查转账配对完整性...")
     all_errors += check_transfer_pairing(vault)
-    print("🔍 2/4 检查币种转账守恒...")
+    print("🔍 2/6 检查币种转账守恒...")
     all_errors += check_currency_conservation(vault)
-    print("🔍 3/4 检查余额计算自洽...")
+    print("🔍 3/6 检查余额计算自洽...")
     all_errors += check_balances_self_consistent(vault)
-    print("🔍 4/4 检查账户透支...")
+    print("🔍 4/6 检查账户透支...")
     all_errors += check_negative_balances(vault)
+    print("🔍 5/6 #33 检查记账频率分析...")
+    all_errors += check_bookkeeping_frequency(vault)
+    print("🔍 6/6 #34 检查账户遗忘检测...")
+    all_errors += check_account_inactivity(vault)
 
     if not all_errors:
         print("\n✅ 所有检查通过 — 财务系统内部一致")
@@ -229,25 +352,45 @@ def main():
                 vault,
                 title="每日完整性检查通过",
                 severity="INFO",
-                details=["4 项检查全部通过", f"账户数: {len(compute_balances(vault))}"],
+                details=["6 项检查全部通过", f"账户数: {len(compute_balances(vault))}"],
                 source="daily_integrity_check.py",
             )
         sys.exit(0)
 
-    has_error = any(level == "ERROR" for level, _ in all_errors)
+    # INFO 不算 error/warn, 过滤掉后再判断
+    actionable = [(l, m) for l, m in all_errors if l in ("ERROR", "WARN")]
+    if not actionable:
+        # 只有 INFO, 视为通过
+        print(f"\n✅ 6 项检查通过 — {len(all_errors)} 条信息")
+        if not args.no_notify:
+            from lib.notifier import write_alert
+            write_alert(
+                vault,
+                title="每日完整性检查通过",
+                severity="INFO",
+                details=[f"[{l}] {m}" for l, m in all_errors],
+                source="daily_integrity_check.py",
+            )
+        sys.exit(0)
+
+    has_error = any(level == "ERROR" for level, _ in actionable)
     severity = "ERROR" if has_error else "WARN"
 
-    print(f"\n{'❌' if has_error else '⚠️ '}  发现 {len(all_errors)} 个问题")
-    for level, msg in all_errors:
+    print(f"\n{'❌' if has_error else '⚠️ '}  发现 {len(actionable)} 个问题")
+    for level, msg in actionable:
         marker = "  ❌" if level == "ERROR" else "  ⚠️ "
         print(f"{marker} [{level}] {msg}")
+    # INFO 一并展示
+    for level, msg in all_errors:
+        if level == "INFO":
+            print(f"  ℹ️  [{level}] {msg}")
 
     if not args.no_notify:
-        details = [f"{level}: {msg}" for level, msg in all_errors]
+        details = [f"[{level}] {msg}" for level, msg in all_errors]
         notify(
             vault_root=vault,
             title=f"每日完整性检查{'失败' if has_error else '告警'}",
-            body=f"发现 {len(all_errors)} 个问题",
+            body=f"发现 {len(actionable)} 个问题",
             severity=severity,
             details=details,
             source="daily_integrity_check.py",

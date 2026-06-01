@@ -12,15 +12,19 @@ tags: [finance, accounts]
 
 > 账户余额由 Dataview 自动计算（初始余额 + 收入 - 支出），无需手动更新。
 
-| 账户名 | 类型 | 币种 | 初始余额 | 说明 | 状态 |
-|--------|------|------|---------|------|------|
-| Cash | cash | CNY | 0 | 现金 | ACTIVE |
-| Alipay | e-wallet | CNY | 0 | 支付宝 | ACTIVE |
-| WeChat Pay | e-wallet | CNY | 0 | 微信支付 | ACTIVE |
-| CMB | bank | CNY | 0 | 招商银行 | ACTIVE |
-| ICBC | bank | CNY | 0 | 工商银行 | ACTIVE |
-| Credit Card | credit-card | CNY | 0 | 信用卡（负数表示负债） | ACTIVE |
-| USD Account | bank | USD | 0 | 美元账户 | ACTIVE |
+| 账户名 | 类型 | 币种 | 初始余额 | 账单日 | 还款日 | 信用额度 | 说明 | 状态 |
+|--------|------|------|---------|--------|--------|---------|------|------|
+| Cash | cash | CNY | 0 | - | - | - | 现金 | ACTIVE |
+| Alipay | e-wallet | CNY | 0 | - | - | - | 支付宝 | ACTIVE |
+| WeChat Pay | e-wallet | CNY | 0 | - | - | - | 微信支付 | ACTIVE |
+| CMB | bank | CNY | 0 | - | - | - | 招商银行 | ACTIVE |
+| ICBC | bank | CNY | 0 | - | - | - | 工商银行 | ACTIVE |
+| Credit Card | credit-card | CNY | 0 | - | - | - | 信用卡（负数表示负债） | ACTIVE |
+| USD Account | bank | USD | 0 | - | - | - | 美元账户 | ACTIVE |
+
+> **信用卡说明**：账单日是出账日，还款日是最后还款日（如出账后 20 天）。`#23` 主动提醒依赖这两个字段。
+> 信用卡示例（CMB 招行）：账单日 5 号，还款日 25 号。
+> 添加信用卡账户时，**必须**填账单日 + 还款日，否则不会提醒。
 
 ---
 

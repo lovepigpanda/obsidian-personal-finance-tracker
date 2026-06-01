@@ -12,15 +12,19 @@ tags: [finance, accounts]
 
 > Account balances are auto-calculated by Dataview (initial balance + income − expenses). No manual update needed.
 
-| Account | Type | Currency | Initial Balance | Note | Status |
-|---------|------|----------|-----------------|------|--------|
-| Cash | cash | CNY | 0 | Cash | ACTIVE |
-| Alipay | e-wallet | CNY | 0 | Alipay | ACTIVE |
-| WeChat Pay | e-wallet | CNY | 0 | WeChat Pay | ACTIVE |
-| CMB | bank | CNY | 0 | China Merchants Bank | ACTIVE |
-| ICBC | bank | CNY | 0 | Industrial and Commercial Bank | ACTIVE |
-| Credit Card | credit-card | CNY | 0 | Credit Card (negative = debt) | ACTIVE |
-| USD Account | bank | USD | 0 | USD Account | ACTIVE |
+| Account | Type | Currency | Initial Balance | Statement Day | Due Day | Credit Limit | Note | Status |
+|---------|------|----------|-----------------|---------------|---------|--------------|------|--------|
+| Cash | cash | CNY | 0 | - | - | - | Cash | ACTIVE |
+| Alipay | e-wallet | CNY | 0 | - | - | - | Alipay | ACTIVE |
+| WeChat Pay | e-wallet | CNY | 0 | - | - | - | WeChat Pay | ACTIVE |
+| CMB | bank | CNY | 0 | - | - | - | China Merchants Bank | ACTIVE |
+| ICBC | bank | CNY | 0 | - | - | - | Industrial and Commercial Bank | ACTIVE |
+| Credit Card | credit-card | CNY | 0 | - | - | - | Credit Card (negative = debt) | ACTIVE |
+| USD Account | bank | USD | 0 | - | - | - | USD Account | ACTIVE |
+
+> **Credit Card note**: Statement Day is when bill is issued, Due Day is the last day to pay (typically 20 days after statement). `#23` proactive reminder depends on these two fields.
+> Example (CMB): Statement Day 5, Due Day 25.
+> When adding a credit card account, **must** fill Statement Day + Due Day, otherwise no reminder.
 
 ---
 

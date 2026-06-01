@@ -44,7 +44,7 @@ triggers:
   - balance
   - 余额
   - 账户
-version: V1.0
+version: V1.1
 status: ACTIVE
 tags: [finance, obsidian, accounting, agent, nlp]
 author: lovepigpanda
@@ -199,13 +199,21 @@ Dataview 仪表盘（~/Obsidian/finance/Dashboards/finance-dashboard.md）自动
 
 1. **确认 vault 目录** — 默认 `~/Obsidian/finance`, 确认或改
 2. **验证必需文件** — 检查 Templates / Categories / Dashboards / Accounts 都在, 缺的主动帮 cp
-3. **引导填账户列表** — 问"你有哪些账户", 帮写 `Accounts/account-list.md`
-4. **配置校验策略** — 主动问"要不要我帮你配每日校验?"
+3. **引导填账户列表** — 问"你有哪些账户", 帮写 `Accounts/account-list.md` (信用卡账户问账单日/还款日)
+4. **配置定时提醒** — **核心!** 主动问"要不要我帮你配以下定时任务?" (Agent 会**帮用户生成** plist/cron, 用户复制粘贴就行):
+   - **每日 18:00** 跑 daily_integrity_check.py (包括 #33 记账频率、#34 账户遗忘检测)
+   - **每周日 20:00** 跑 weekly_summary.py (#35 周末复盘)
+   - **每月最后一日 21:00** 跑 monthly_summary.py (#36 月末自检)
+   - **每日 8:00** 跑 credit_card_reminder.py (信用卡临近账单日/还款日时提醒, #23)
+   - **每日 8:05** 跑 installment_check.py (分期 PENDING 到期检查, #24)
 5. **配置通知偏好** — 主动问"校验失败时我用我自己的通道 (飞书/微信) 发给你, 还是写 alerts.md?"
 6. **保存配置** — 写到 `Accounts/agent-config.md` (用户可见、可改)
 7. **试一笔** — 验证整个流程通
 
-**关键**: 步骤 4 默认选**Agent 自己配** (不依赖系统 cron), 因为 Agent 在每次会话开始时自己判断"该跑了吗"。
+**为什么需要定时任务**:
+- Agent 只在**用户开会话**时才在线。会话关了, Agent 就"睡"了。
+- 想让 Agent 主动提醒用户 ("该还款了"/"今天没记账"), Agent 必须在**指定时间被唤醒**——只有系统定时任务能保证。
+- Agent 的责任是**主动帮用户配**定时任务 + **主动分析 alerts.md**, 不是逃避定时任务。
 
 ---
 
@@ -544,6 +552,83 @@ python3 ~/Project/obsidian-personal-finance-tracker/scripts/weekly_dashboard_che
 ```
 
 校验内容: 仪表盘文件引用了所有必要字段、账户表完整、打印权威余额供用户对账 Dataview 显示。
+
+### scripts/credit_card_reminder.py — 信用卡还款提醒 (#23)
+
+**何时用**: Agent 帮用户配每日 8:00 定时任务。
+
+```bash
+python3 ~/Project/obsidian-personal-finance-tracker/scripts/credit_card_reminder.py --vault ~/Obsidian/finance
+```
+
+校验内容:
+- 扫 `Accounts/account-list.md` 找 `type: credit` 账户
+- 对每张卡算下次出账日 + 还款日 (处理跨月、月末)
+- 还款日 ≤ 5 天 → WARN, 已过 → ERROR
+- 写到 `alerts.md`
+
+**前置**: 信用卡账户必须在 `account-list.md` 写 `statement_day` + `payment_due_day` 字段, 否则报 INFO 提示补字段 (软告警, 不阻塞)。
+
+### scripts/installment_check.py — 分期完整性检查 (#24)
+
+**何时用**: Agent 帮用户配每日 8:05 定时任务。
+
+```bash
+python3 ~/Project/obsidian-personal-finance-tracker/scripts/installment_check.py --vault ~/Obsidian/finance
+```
+
+校验内容:
+- 按 `installment_group_id` 聚合所有分期 expense
+- 校验 ① 总期数 ② 字段一致性 (amount/currency/account/category) ③ PENDING 是否到期 ④ 孤立分期 (只有 1 期但标记分期)
+- 写到 `alerts.md`
+
+### scripts/installment_helper.py — 分期模板生成器 (#24)
+
+**何时用**: 用户写完第一期 expense 后, Agent **立即调**。
+
+```bash
+python3 ~/Project/obsidian-personal-finance-tracker/scripts/installment_helper.py create \
+  --first-file ~/Obsidian/finance/Transactions/expenses/<第一期文件> \
+  --total 12
+```
+
+做什么:
+- 读第一期 frontmatter, 复制 amount/currency/account/category/note
+- 自动生成 N-1 个 PENDING expense 模板 (日期递增)
+- 缺 `installment_group_id` 时自动生成 `INS-{date}-{account}-{amount}` 格式
+- 用户实际扣款时, 改 status=PENDING → ACTIVE, 再调 `validate_transaction.py`
+
+### scripts/weekly_summary.py — 周末复盘 (#35)
+
+**何时用**: Agent 帮用户配每周日 20:00 定时任务。
+
+```bash
+python3 ~/Project/obsidian-personal-finance-tracker/scripts/weekly_summary.py --vault ~/Obsidian/finance
+```
+
+校验内容:
+- 范围: 本周一 00:00 ~ 本周日 23:59
+- 输出: 笔数 / 总支出 / 总收入 / 分类前 3 / 账户余额变化 / vs 上周同比
+- 写到 `alerts.md`
+
+**Agent 后续**: 读 `alerts.md`, 把"本周 23 笔, 餐饮 ¥820 (降 32%)"用自己通道推给用户。
+
+### scripts/monthly_summary.py — 月末自检 (#36)
+
+**何时用**: Agent 帮用户配每月最后一日 21:00 定时任务。
+
+```bash
+python3 ~/Project/obsidian-personal-finance-tracker/scripts/monthly_summary.py --vault ~/Obsidian/finance
+# 历史月份
+python3 ~/Project/obsidian-personal-finance-tracker/scripts/monthly_summary.py --vault ~/Obsidian/finance --month 2026-03
+```
+
+校验内容:
+- 范围: 当月 1 号 ~ 当月最后一天 (未结束则截止到今日)
+- 输出: 笔数 / 支出 / 收入 / 储蓄率 / 分类汇总 / 跨账户流量
+- 写到 `alerts.md`
+
+**储蓄率公式**: `(收入 - 支出) / 收入` (转出不算支出, transfer_in/out 算跨账户流量)。
 
 ### 通知方式 (脚本只做最基础的, Agent 做剩下的)
 

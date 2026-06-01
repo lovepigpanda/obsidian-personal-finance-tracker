@@ -132,8 +132,14 @@ def parse_accounts(vault_root: str) -> Dict[str, Dict]:
     """
     从 account-list.md 解析账户表，返回 {account_name: {currency, initial_balance, ...}}
 
-    支持格式示例：
-    | Alipay | CNY | 1000.00 | Alipay,支付宝 |
+    支持的列 (按列名匹配, 不依赖列顺序):
+        - 账户 / Account / 账户名 / Account Name  -> name
+        - 类型 / Type                              -> type
+        - 币种 / Currency                          -> currency
+        - 初始余额 / Initial Balance                -> initial_balance
+        - 账单日 / Statement Day                    -> statement_day (int, 信用卡)
+        - 还款日 / Due Day                          -> due_day (int, 信用卡)
+        - 信用额度 / Credit Limit                  -> credit_limit
     """
     acc_file = find_accounts_file(vault_root)
     if not acc_file:
@@ -141,30 +147,67 @@ def parse_accounts(vault_root: str) -> Dict[str, Dict]:
 
     fm, body = parse_frontmatter(acc_file)
 
+    # 列名别名 (zh + en)
+    col_aliases = {
+        "name": ["账户", "账户名", "Account", "Account Name", "Name"],
+        "type": ["类型", "Type"],
+        "currency": ["币种", "Currency"],
+        "initial_balance": ["初始余额", "Initial Balance", "Initial"],
+        "statement_day": ["账单日", "Statement Day", "Statement"],
+        "due_day": ["还款日", "Due Day", "Due"],
+        "credit_limit": ["信用额度", "Credit Limit", "Limit"],
+    }
+
+    header_cols = []  # 头部: [(role, idx), ...]
     accounts = {}
-    # 找表格
+
     for line in body.split("\n"):
         line = line.strip()
         if not line.startswith("|"):
             continue
-        # 跳过表头分隔行
         if re.match(r"^\|[\s\-:|]+\|$", line):
             continue
         cells = [c.strip() for c in line.strip("|").split("|")]
-        if len(cells) < 2:
+
+        if not header_cols:
+            # 第一行表头
+            for idx, cell in enumerate(cells):
+                cell_clean = cell.strip()
+                for role, aliases in col_aliases.items():
+                    if cell_clean in aliases:
+                        header_cols.append((role, idx))
+                        break
             continue
-        # 期望第一列是账户名，第二列是币种，第三列是初始余额
-        name = cells[0]
-        if not name or name in ("账户", "Account", "账户名", "---"):
+
+        if not header_cols:
             continue
-        currency = cells[1] if len(cells) >= 2 else "CNY"
+
+        # 解析行
+        row = {role: (cells[idx] if idx < len(cells) else "") for role, idx in header_cols}
+        name = row.get("name", "")
+        if not name:
+            continue
+
+        # 类型化
+        currency = row.get("currency", "CNY") or "CNY"
         try:
-            initial = float(cells[2]) if len(cells) >= 3 else 0.0
+            initial = float(row.get("initial_balance", "0") or "0")
         except ValueError:
             initial = 0.0
+
+        def _int(s):
+            try:
+                return int(s) if s and s != "-" else None
+            except ValueError:
+                return None
+
         accounts[name] = {
             "currency": currency,
+            "type": row.get("type", ""),
             "initial_balance": initial,
+            "statement_day": _int(row.get("statement_day", "")),
+            "due_day": _int(row.get("due_day", "")),
+            "credit_limit": _int(row.get("credit_limit", "")),
             "row": cells,
         }
     return accounts

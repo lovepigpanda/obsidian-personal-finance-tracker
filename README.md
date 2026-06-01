@@ -110,8 +110,13 @@ status: ACTIVE
 | 脚本 | Agent 何时调 | 校验内容 |
 |------|------------|---------|
 | `validate_transaction.py` | **每次记账后立即**（步骤 7.5，Agent 责任） | 必填字段、金额合法、日期合法、币种合法、账户已注册、**transfer 配对完整且一致** |
-| `daily_integrity_check.py` | **Agent 自己在会话开始时判断**（不依赖系统 cron） | 转账配对守恒、每币种 transfer 平衡、Python 余额 vs 累加自洽、透支检查 |
+| `daily_integrity_check.py` | **Agent 帮用户配每日 18:00 定时任务** (launchd/cron) | 转账配对守恒、每币种 transfer 平衡、Python 余额 vs 累加自洽、透支检查、**#33 记账频率、#34 账户遗忘检测** |
 | `weekly_dashboard_check.py` | **Agent 周日 8 点主动调** | 仪表盘文件结构、账户表完整、打印权威余额供对账 |
+| `weekly_summary.py` | **Agent 周末 20 点主动调 (#35)** | 本周笔数 / 收支 / 分类前 3 / 同比上周，写 alerts.md |
+| `monthly_summary.py` | **Agent 月末主动调 (#36)** | 本月笔数 / 收支 / 储蓄率 / 分类汇总 / 跨账户流量，写 alerts.md |
+| `credit_card_reminder.py` | **Agent 帮用户配每日 8:00 定时任务 (#23)** | 信用卡还款日提醒 (WARN: ≤5 天, INFO: >5 天) |
+| `installment_check.py` | **Agent 帮用户配每日 8:00 定时任务 (#24)** | 分期组完整性、字段一致性、PENDING 到期提醒 |
+| `installment_helper.py` | **用户写完第一期 expense 时 Agent 调 (#24)** | 从第一期生成 N-1 个 PENDING 期模板 |
 
 ### 用法
 
@@ -124,6 +129,23 @@ python3 ~/Project/obsidian-personal-finance-tracker/scripts/daily_integrity_chec
 
 # 周度结构
 python3 ~/Project/obsidian-personal-finance-tracker/scripts/weekly_dashboard_check.py
+
+# 周末复盘 (#35) - Agent 周日 20:00 主动调
+python3 ~/Project/obsidian-personal-finance-tracker/scripts/weekly_summary.py --vault ~/Obsidian/finance
+
+# 月末自检 (#36) - Agent 月末主动调
+python3 ~/Project/obsidian-personal-finance-tracker/scripts/monthly_summary.py --vault ~/Obsidian/finance
+
+# 信用卡还款提醒 (#23) - Agent 帮用户配每日 8:00 定时任务
+python3 ~/Project/obsidian-personal-finance-tracker/scripts/credit_card_reminder.py --vault ~/Obsidian/finance
+
+# 分期检查 (#24) - Agent 帮用户配每日 8:00 定时任务
+python3 ~/Project/obsidian-personal-finance-tracker/scripts/installment_check.py --vault ~/Obsidian/finance
+
+# 分期模板生成 (#24) - 用户写完第一期后, Agent 调
+python3 ~/Project/obsidian-personal-finance-tracker/scripts/installment_helper.py create \
+  --first-file ~/Obsidian/finance/Transactions/expenses/<第一期文件> \
+  --total 12
 ```
 
 ### 通知渠道
@@ -396,8 +418,13 @@ See [en/AGENTS.md Example 5](en/AGENTS.md) and [en/Templates/transfer-template.m
 | Script | When | Validates |
 |--------|------|-----------|
 | `validate_transaction.py` | AI Agent calls after each write | Required fields, valid amount, valid date, valid currency, account registered, **transfer pair complete & consistent** |
-| `daily_integrity_check.py` | Agent itself decides at session start whether to run (no system cron) | Transfer pair integrity, per-currency transfer balance, Python balance vs accumulation self-consistency, overdraft check |
+| `daily_integrity_check.py` | **Agent helps user configure daily 18:00 scheduled task** (launchd/cron) | Transfer pair integrity, per-currency transfer balance, Python balance vs accumulation self-consistency, overdraft check, **#33 bookkeeping frequency, #34 account inactivity detection** |
 | `weekly_dashboard_check.py` | Agent proactively runs on Sundays | Dashboard file structure, account table completeness, prints authoritative balances for cross-check |
+| `weekly_summary.py` | **Agent proactively runs on Sunday 20:00 (#35)** | Weekly transactions / income / expense / top 3 categories / WoW change, writes to alerts.md |
+| `monthly_summary.py` | **Agent proactively runs at month-end (#36)** | Monthly transactions / income / expense / savings rate / category breakdown / cross-account flow, writes to alerts.md |
+| `credit_card_reminder.py` | **Agent helps user configure daily 8:00 scheduled task (#23)** | Credit card payment reminder (WARN: ≤5 days, INFO: >5 days) |
+| `installment_check.py` | **Agent helps user configure daily 8:00 scheduled task (#24)** | Installment group integrity, field consistency, PENDING-due reminder |
+| `installment_helper.py` | **Agent calls after user writes first installment (#24)** | Generate N-1 PENDING installment templates from first |
 
 ### Usage
 
@@ -410,6 +437,23 @@ python3 ~/Project/obsidian-personal-finance-tracker/scripts/daily_integrity_chec
 
 # Weekly structure
 python3 ~/Project/obsidian-personal-finance-tracker/scripts/weekly_dashboard_check.py
+
+# Weekly summary (#35) - Agent runs Sunday 20:00
+python3 ~/Project/obsidian-personal-finance-tracker/scripts/weekly_summary.py --vault ~/Obsidian/finance
+
+# Monthly summary (#36) - Agent runs at month-end
+python3 ~/Project/obsidian-personal-finance-tracker/scripts/monthly_summary.py --vault ~/Obsidian/finance
+
+# Credit card reminder (#23) - Agent helps user configure daily 8:00 scheduled task
+python3 ~/Project/obsidian-personal-finance-tracker/scripts/credit_card_reminder.py --vault ~/Obsidian/finance
+
+# Installment check (#24) - Agent helps user configure daily 8:00 scheduled task
+python3 ~/Project/obsidian-personal-finance-tracker/scripts/installment_check.py --vault ~/Obsidian/finance
+
+# Installment helper (#24) - After user writes first installment, Agent calls
+python3 ~/Project/obsidian-personal-finance-tracker/scripts/installment_helper.py create \
+  --first-file ~/Obsidian/finance/Transactions/expenses/<first_installment> \
+  --total 12
 ```
 
 ### Notification Channels

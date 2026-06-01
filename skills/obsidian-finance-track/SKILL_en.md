@@ -48,7 +48,7 @@ triggers:
   - balance
   - 余额
   - 账户
-version: V1.0
+version: V1.1
 status: ACTIVE
 tags: [finance, obsidian, accounting, agent, nlp]
 author: lovepigpanda
@@ -205,14 +205,21 @@ Load this skill when ANY of the following conditions are met:
 **Do NOT silently start logging**. First complete the 7-step configuration (full content in [AGENTS-PROACTIVE.md](../../en/AGENTS-PROACTIVE.md)):
 
 1. **Confirm vault directory** — default `~/Obsidian/finance`, confirm or change
-2. **Verify required files** — check Templates / Categories / Dashboards / Accounts exist, proactively cp any missing
-3. **Guide account list** — ask "what accounts do you have", write `Accounts/account-list.md`
-4. **Configure validation strategy** — proactively ask "shall I set up daily validation?"
-5. **Configure notification preferences** — proactively ask "on validation failure, shall I use my own channel (Feishu / WeChat) or write alerts.md?"
-6. **Save configuration** — write to `Accounts/agent-config.md` (user-visible, editable)
-7. **Try one transaction** — verify the whole pipeline works
+2. **Verify required files** — check Templates / Categories / Dashboards / Accounts exist, proactively cp missing ones
+3. **Guide filling account list** — ask "what accounts do you have", help write `Accounts/account-list.md` (ask credit card accounts for statement day / payment due day)
+4. **Configure scheduled reminders** — **Core!** Proactively ask "shall I help you set up these scheduled tasks?" (Agent will **help generate** plist/cron, user just copies & pastes):
+   - **Daily 18:00** run daily_integrity_check.py (includes #33 bookkeeping frequency, #34 account inactivity detection)
+   - **Sunday 20:00** run weekly_summary.py (#35 weekend recap)
+   - **Last day of month 21:00** run monthly_summary.py (#36 month-end self-check)
+   - **Daily 8:00** run credit_card_reminder.py (remind when card statement/due day approaching, #23)
+5. **Configure notification preferences** — ask "shall I use my own channel (Feishu/WeChat) to notify you, or write to alerts.md?"
+6. **Save config** — write to `Accounts/agent-config.md` (user-visible, user-editable)
+7. **Test one transaction** — verify entire flow works
 
-**Key**: Step 4 defaults to **Agent self-configures** (no system cron dependency), because the Agent itself checks at every session start: "is it time to run?"
+**Why scheduled tasks are needed**:
+- Agent is only online when user has a session. Session closed = Agent "sleeps".
+- To have Agent proactively remind the user ("payment due today" / "no transactions today"), Agent must be **woken up at a specified time** — only system scheduled tasks can guarantee this.
+- Agent's responsibility is to **proactively help the user configure** scheduled tasks + **proactively analyze alerts.md**, not to avoid scheduled tasks.
 
 ---
 
@@ -556,7 +563,84 @@ Validates:
 python3 ~/Project/obsidian-personal-finance-tracker/scripts/weekly_dashboard_check.py
 ```
 
-Validates: dashboard file references all required fields, account table complete, prints authoritative balances for user to cross-check Dataview display.
+Validates: dashboard files reference all required fields, account table complete, prints authoritative balances for user cross-check against Dataview display.
+
+### scripts/credit_card_reminder.py — Credit Card Payment Reminder (#23)
+
+**When**: Agent helps user configure daily 8:00 scheduled task.
+
+```bash
+python3 ~/Project/obsidian-personal-finance-tracker/scripts/credit_card_reminder.py --vault ~/Obsidian/finance
+```
+
+Validates:
+- Scans `Accounts/account-list.md` for `type: credit` accounts
+- Computes next statement date + due date for each card (handles month-crossing, month-end edge cases)
+- Due date ≤ 5 days → WARN, already past → ERROR
+- Writes to `alerts.md`
+
+**Prerequisite**: credit card accounts must have `statement_day` + `payment_due_day` fields in `account-list.md`, otherwise INFO prompts user to fill (soft alert, non-blocking).
+
+### scripts/installment_check.py — Installment Integrity Check (#24)
+
+**When**: Agent helps user configure daily 8:05 scheduled task.
+
+```bash
+python3 ~/Project/obsidian-personal-finance-tracker/scripts/installment_check.py --vault ~/Obsidian/finance
+```
+
+Validates:
+- Groups all installment expenses by `installment_group_id`
+- Validates ① total count ② field consistency (amount/currency/account/category) ③ PENDING due date ④ orphan installments (1 item but marked as installment)
+- Writes to `alerts.md`
+
+### scripts/installment_helper.py — Installment Template Generator (#24)
+
+**When**: After user writes the first installment expense, Agent **calls immediately**.
+
+```bash
+python3 ~/Project/obsidian-personal-finance-tracker/scripts/installment_helper.py create \
+  --first-file ~/Obsidian/finance/Transactions/expenses/<first_installment_file> \
+  --total 12
+```
+
+What it does:
+- Reads first installment frontmatter, copies amount/currency/account/category/note
+- Auto-generates N-1 PENDING expense templates (dates incremented)
+- If `installment_group_id` is missing, auto-generates `INS-{date}-{account}-{amount}` format
+- User flips status=PENDING → ACTIVE on actual deduction, then runs `validate_transaction.py`
+
+### scripts/weekly_summary.py — Weekend Recap (#35)
+
+**When**: Agent helps user configure Sunday 20:00 weekly scheduled task.
+
+```bash
+python3 ~/Project/obsidian-personal-finance-tracker/scripts/weekly_summary.py --vault ~/Obsidian/finance
+```
+
+Validates:
+- Range: this Monday 00:00 ~ this Sunday 23:59
+- Output: tx count / total expense / total income / top 3 categories / account balance changes / week-over-week
+- Writes to `alerts.md`
+
+**Agent follow-up**: reads `alerts.md`, pushes "23 transactions this week, food ¥820 (-32%)" via own channel.
+
+### scripts/monthly_summary.py — Month-end Self-Check (#36)
+
+**When**: Agent helps user configure last-day-of-month 21:00 scheduled task.
+
+```bash
+python3 ~/Project/obsidian-personal-finance-tracker/scripts/monthly_summary.py --vault ~/Obsidian/finance
+# Historical month
+python3 ~/Project/obsidian-personal-finance-tracker/scripts/monthly_summary.py --vault ~/Obsidian/finance --month 2026-03
+```
+
+Validates:
+- Range: 1st of month ~ last day of month (cuts off at today if not yet ended)
+- Output: tx count / expense / income / savings rate / category breakdown / cross-account flow
+- Writes to `alerts.md`
+
+**Savings rate formula**: `(income − expense) / income` (transfers out don't count as expense, transfer_in/out counts as cross-account flow).
 
 ### Notification Methods (scripts do the basics, Agent does the rest)
 
