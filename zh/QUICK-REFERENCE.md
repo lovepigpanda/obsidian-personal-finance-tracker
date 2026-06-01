@@ -44,6 +44,14 @@ description: AI Agent 快速查找的分类和账户参考（结构化格式）
 | Gift | Gift | 🎁 | 红包,礼金 |
 | Other | Other | ❓ | 其他,偶然收入 |
 
+## 转账分类（Transfer Categories）
+
+| 分类 | 英文名 | Emoji | 关键词 |
+|------|--------|-------|--------|
+| Transfer | Transfer | 🔁 | 转账,转给,打给,转入,转出,转到,调拨,调头寸,充值,提现,还信用卡,还卡,补仓,from,to |
+
+> **注意**：转账 ≠ 收支。识别到转账意图时，必须走双文件配对流程（见下方"转账文件"章节）。
+
 ## 账户映射（Account Mapping）
 
 | 账户名 | 类型 | 关键词 |
@@ -91,8 +99,24 @@ Transactions/incomes/{YYYY-MM-DD}-{description}-{amount}-{CURRENCY}-{STATUS}.md
 ```
 示例：`Transactions/incomes/2026-06-01-salary-15000-CNY-ACTIVE.md`
 
+### 转账文件（双文件配对）
+
+```
+Transactions/transfers/out/{YYYY-MM-DD}-transfer-out-{from}-to-{to}-{amount}-{CURRENCY}-{STATUS}.md
+Transactions/transfers/in/{YYYY-MM-DD}-transfer-in-{to}-from-{from}-{amount}-{CURRENCY}-{STATUS}.md
+```
+
+示例：
+```
+Transactions/transfers/out/2026-06-01-transfer-out-Alipay-to-CMB-5000-CNY-ACTIVE.md
+Transactions/transfers/in/2026-06-01-transfer-in-CMB-from-Alipay-5000-CNY-ACTIVE.md
+```
+
+**配对 ID 规则**：`T-{YYYY-MM-DD}-{随机串}`，两个文件**必须**用相同 ID
+
 ## Frontmatter 模板（AI 生成）
 
+### 支出 / 收入
 ```yaml
 ---
 type: expense                    # 或 income
@@ -104,6 +128,24 @@ account: AccountName
 payment_method: PaymentMethod
 note: "用户原始描述"
 tags: [expense, categoryName]    # expense 或 income + 分类名
+status: ACTIVE
+created: YYYY-MM-DD
+---
+```
+
+### 转账（双文件，from/to 互换，配对 ID 一致）
+```yaml
+---
+type: transfer
+date: YYYY-MM-DD
+amount: 数字
+currency: CNY
+category: Transfer
+from_account: AccountName        # 转出账户
+to_account: AccountName          # 转入账户
+transfer_pair_id: T-YYYY-MM-DD-xxx  # ⚠️ 双文件必须完全一致
+note: "用户原始描述"
+tags: [transfer, finance]
 status: ACTIVE
 created: YYYY-MM-DD
 ---
@@ -137,14 +179,19 @@ created: YYYY-MM-DD
 1. 读取用户自然语言输入
 2. 判断 type：支出 ("花了","买了","消费","付了") → expense
                    收入 ("收到","进账","赚了","工资") → income
+                   转账 ("转","打","调拨","还信用卡","from X to Y") → transfer
 3. 提取 date：时间词 → YYYY-MM-DD
 4. 提取 amount + currency：数字 + 币种
 5. 匹配 account：支付工具 → 账户名
 6. 匹配 payment_method：同上
 7. 匹配 category：根据 note 关键词查上方分类表
-8. 生成 filename：{date}-{description}-{amount}-{currency}-ACTIVE.md
-9. 写入 Transactions/expenses/ 或 Transactions/incomes/
-10. 返回完成信息给用户
+8. 生成 filename：
+   - expense → {date}-{description}-{amount}-{currency}-ACTIVE.md
+   - income  → {date}-{description}-{amount}-{currency}-ACTIVE.md
+   - transfer → {date}-transfer-out-{from}-to-{to}-{amount}-{currency}-ACTIVE.md
+                {date}-transfer-in-{to}-from-{from}-{amount}-{currency}-ACTIVE.md
+9. 写入对应目录（expense→expenses/, income→incomes/, transfer→transfers/out/ + transfers/in/）
+10. 返回完成信息给用户（含配对 ID）
 ```
 
 ---
@@ -155,8 +202,10 @@ created: YYYY-MM-DD
 |------|------|
 | 支出规则 | `Categories/expense-category-rules.md` |
 | 收入规则 | `Categories/income-category-rules.md` |
+| 转账分类 | `Categories/transfer-categories.md` |
 | 支出模板 | `Templates/expense-template.md` |
 | 收入模板 | `Templates/income-template.md` |
+| 转账模板 | `Templates/transfer-template.md` |
 | 仪表盘 | `Dashboards/finance-dashboard.md` |
 | 账户列表 | `Accounts/account-list.md` |
 | 本文件 | `QUICK-REFERENCE.md` |

@@ -70,17 +70,42 @@ const initialBalances = { "Cash": 0, "Alipay": 0, "WeChat Pay": 0, "CMB": 0, "IC
 
 const expenses = dv.pages('"Transactions/expenses"').filter(p => p.status === "ACTIVE");
 const incomes = dv.pages('"Transactions/incomes"').filter(p => p.status === "ACTIVE");
+const transferOut = dv.pages('"Transactions/transfers/out"').filter(p => p.status === "ACTIVE");
+const transferIn = dv.pages('"Transactions/transfers/in"').filter(p => p.status === "ACTIVE");
 
 const results = [];
 for (const account of accounts) {
   const expSum = expenses.filter(p => p.account === account).amount.sum() || 0;
   const incSum = incomes.filter(p => p.account === account).amount.sum() || 0;
-  const balance = (initialBalances[account] || 0) + incSum - expSum;
+  const outSum = transferOut.filter(p => p.from_account === account).amount.sum() || 0;
+  const inSum = transferIn.filter(p => p.to_account === account).amount.sum() || 0;
+  const balance = (initialBalances[account] || 0) + incSum - expSum - outSum + inSum;
   results.push({ account, balance });
 }
 
 dv.table(["账户", "余额"], results.map(r => [r.account, r.balance.toFixed(2)]));
 ```
+
+---
+
+## 本月转账
+
+```dataview
+table date, from_account + " → " + to_account as "流向", amount, currency, note
+from "Transactions/transfers/out"
+where date >= 2026-06-01 and date <= 2026-06-30 and status = "ACTIVE"
+sort date desc
+```
+
+**本月转出总额**（按币种）：```dataview
+SELECT sum(amount) FROM "Transactions/transfers/out" WHERE date >= 2026-06-01 AND date <= 2026-06-30 AND status = "ACTIVE" GROUP BY currency
+```
+
+**本月转入总额**（按币种）：```dataview
+SELECT sum(amount) FROM "Transactions/transfers/in" WHERE date >= 2026-06-01 AND date <= 2026-06-30 AND status = "ACTIVE" GROUP BY currency
+```
+
+**查询配对：** 在 Obsidian 全局搜索 `transfer_pair_id: T-2026-06-01-xxx`，可同时定位 out 和 in 两个文件。
 
 ---
 
@@ -100,6 +125,8 @@ limit 10
 
 - [[Expense Template]] — 记录新支出
 - [[Income Template]] — 记录新收入
+- [[Transfer Template]] — 记录新转账（双文件配对）
 - [[Account List]] — 查看账户余额
 - [[Expense Categories]] — 支出分类说明
 - [[Income Categories]] — 收入分类说明
+- [[Transfer Categories]] — 转账分类说明

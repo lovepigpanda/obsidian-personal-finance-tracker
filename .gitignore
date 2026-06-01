@@ -1,4 +1,10 @@
 # 账本数据 - 本地私有，不上传 GitHub
+# (本项目用 Templates/、Categories/、Dashboards/、AGENTS.md 等 .md 文件作为分发内容, 不忽略)
 zh/Transactions/
 en/Transactions/
-*.md
+Transactions/
+
+# Python 编译缓存
+__pycache__/
+*.pyc
+*.pyo

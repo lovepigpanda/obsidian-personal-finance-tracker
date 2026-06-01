@@ -70,17 +70,42 @@ const initialBalances = { "Cash": 0, "Alipay": 0, "WeChat Pay": 0, "CMB": 0, "IC
 
 const expenses = dv.pages('"Transactions/expenses"').filter(p => p.status === "ACTIVE");
 const incomes = dv.pages('"Transactions/incomes"').filter(p => p.status === "ACTIVE");
+const transferOut = dv.pages('"Transactions/transfers/out"').filter(p => p.status === "ACTIVE");
+const transferIn = dv.pages('"Transactions/transfers/in"').filter(p => p.status === "ACTIVE");
 
 const results = [];
 for (const account of accounts) {
   const expSum = expenses.filter(p => p.account === account).amount.sum() || 0;
   const incSum = incomes.filter(p => p.account === account).amount.sum() || 0;
-  const balance = (initialBalances[account] || 0) + incSum - expSum;
+  const outSum = transferOut.filter(p => p.from_account === account).amount.sum() || 0;
+  const inSum = transferIn.filter(p => p.to_account === account).amount.sum() || 0;
+  const balance = (initialBalances[account] || 0) + incSum - expSum - outSum + inSum;
   results.push({ account, balance });
 }
 
 dv.table(["Account", "Balance"], results.map(r => [r.account, r.balance.toFixed(2)]));
 ```
+
+---
+
+## This Month Transfers
+
+```dataview
+table date, from_account + " → " + to_account as "Flow", amount, currency, note
+from "Transactions/transfers/out"
+where date >= 2026-06-01 and date <= 2026-06-30 and status = "ACTIVE"
+sort date desc
+```
+
+**This month total transfers out** (by currency): ```dataview
+SELECT sum(amount) FROM "Transactions/transfers/out" WHERE date >= 2026-06-01 AND date <= 2026-06-30 AND status = "ACTIVE" GROUP BY currency
+```
+
+**This month total transfers in** (by currency): ```dataview
+SELECT sum(amount) FROM "Transactions/transfers/in" WHERE date >= 2026-06-01 AND date <= 2026-06-30 AND status = "ACTIVE" GROUP BY currency
+```
+
+**Find pair:** In Obsidian global search `transfer_pair_id: T-2026-06-01-xxx`, you can locate both the out and in files at the same time.
 
 ---
 
@@ -100,6 +125,8 @@ limit 10
 
 - [[Expense Template]] — Record new expense
 - [[Income Template]] — Record new income
+- [[Transfer Template]] — Record new transfer (paired dual files)
 - [[Account List]] — View account balances
 - [[Expense Categories]] — Expense category descriptions
 - [[Income Categories]] — Income category descriptions
+- [[Transfer Categories]] — Transfer category descriptions

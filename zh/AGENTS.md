@@ -137,6 +137,16 @@ created: 2026-06-01
 | Cash | 现金 | 现金 |
 | USD Account | 美元账户、USD | 美元账户 |
 
+### 转账关键词识别
+
+| 触发词 | 意图 |
+|--------|------|
+| 转账 / 转给 / 转到 / 打给 | transfer |
+| 转出 / 转入 | transfer（方向） |
+| 调拨 / 调头寸 / 充值 / 提现 | transfer |
+| 还信用卡 / 还卡 | transfer（出账→信用卡） |
+| from X to Y / X 转 Y | transfer |
+
 ---
 
 ## 使用示例
@@ -223,20 +233,65 @@ Transactions/incomes/2026-06-01-freelancing-500-USD-ACTIVE.md
 
 ---
 
+### 示例 5：转账记账
+
+**用户输入：**
+> "从支付宝转 5000 到招行，还信用卡"
+
+**AI Agent 处理：**
+1. 判断 type = **transfer**（识别"转"+"还信用卡"）
+2. 解析方向：from = Alipay，to = CMB
+3. 金额 = 5000，币种 = CNY
+4. category = Transfer（转账专用分类）
+5. 生成配对 ID = `T-2026-06-01-xxx`
+6. **创建 2 个文件**（out + in，共用同一个 `transfer_pair_id`）
+
+**创建文件：**
+```
+Transactions/transfers/out/2026-06-01-transfer-out-Alipay-to-CMB-5000-CNY-ACTIVE.md
+Transactions/transfers/in/2026-06-01-transfer-in-CMB-from-Alipay-5000-CNY-ACTIVE.md
+```
+
+**关键字段：**
+```yaml
+type: transfer
+amount: 5000
+currency: CNY
+category: Transfer
+from_account: Alipay
+to_account: CMB
+transfer_pair_id: T-2026-06-01-abc123
+```
+
+**查询配对：** 在 Obsidian 全局搜索 `transfer_pair_id: T-2026-06-01-abc123`，可同时定位 out 和 in 两个文件。
+
+---
+
 ## AI Agent 操作检查清单
 
 当用户要求记账时，AI Agent 应：
 
-- [ ] **1. 识别意图**：判断是支出（expense）还是收入（income）
+### 通用流程
+
+- [ ] **1. 识别意图**：判断是支出（expense）/ 收入（income）/ 转账（transfer）
 - [ ] **2. 提取日期**：将"今天/昨天/前天"转换为标准日期格式
 - [ ] **3. 提取金额**：数字 + 币种（默认 CNY）
 - [ ] **4. 提取账户**：支付工具 → 账户名（见账户映射表）
 - [ ] **5. 匹配分类**：根据备注关键词匹配分类（见分类映射表）
 - [ ] **6. 生成文件名**：`YYYY-MM-DD-{description}-{amount}-{CURRENCY}-ACTIVE.md`
-- [ ] **7. 创建文件**：写入 `Transactions/expenses/` 或 `Transactions/incomes/`
-- [ ] **8. 写入 frontmatter**：type/date/amount/currency/category/account/payment_method/note/tags/status
+- [ ] **7. 创建文件**：写入对应目录
+- [ ] **8. 写入 frontmatter**：完整字段
 - [ ] **9. 写入正文**：标准格式表格
 - [ ] **10. 确认完成**：告诉用户文件路径和主要内容
+
+### 转账专属流程
+
+- [ ] **T1. 识别转账意图**：匹配"转/打/调拨/还信用卡/from X to Y"等触发词
+- [ ] **T2. 解析 from/to 账户**：识别"X 转 Y"或"from X to Y"格式
+- [ ] **T3. 生成配对 ID**：`T-{YYYY-MM-DD}-{随机串}`，out 和 in 共用同一 ID
+- [ ] **T4. 创建 2 个文件**：`Transactions/transfers/out/` 和 `Transactions/transfers/in/`
+- [ ] **T5. 写入配对字段**：`transfer_pair_id` 必须在两文件完全一致
+- [ ] **T6. 提示用户配对 ID**：方便后续查询对端
 
 ---
 
@@ -249,6 +304,9 @@ Transactions/incomes/2026-06-01-freelancing-500-USD-ACTIVE.md
 5. **多币种**：根据用户描述的币种如实记录，不转换
 6. **关键词匹配**：优先匹配精准词（如"沙县"→Food），再匹配宽泛词（如"其他"→Other）
 7. **账户选择**：如用户未指定账户，默认使用 `Alipay`（支出）或 `CMB`（收入）
+8. **转账识别**：识别到"转/打/调拨"等触发词时，**必须**走 transfer 流程（创建 2 文件），不要当成支出或收入
+9. **配对 ID 一致性**：转账 out 和 in 两个文件的 `transfer_pair_id` 必须**完全一致**，否则查询配对会失败
+10. **配对 ID 唯一性**：每次转账用新的 `T-{date}-{随机串}`，避免历史数据冲突
 
 ---
 
@@ -259,15 +317,20 @@ Transactions/incomes/2026-06-01-freelancing-500-USD-ACTIVE.md
 ├── AGENTS.md                         ← 本文件（AI Agent 使用指南）
 ├── Templates/                        ← Templater 模板（人类手动使用）
 │   ├── expense-template.md
-│   └── income-template.md
+│   ├── income-template.md
+│   └── transfer-template.md
 ├── Transactions/                     ← AI Agent 创建的文件目录
 │   ├── expenses/
-│   └── incomes/
+│   ├── incomes/
+│   └── transfers/
+│       ├── out/                      ← 转出文件
+│       └── in/                       ← 转入文件
 ├── Dashboards/
 │   └── finance-dashboard.md          ← Dataview 仪表盘
 ├── Categories/
 │   ├── expense-category-rules.md     ← AI Agent 读取的分类规则
-│   └── income-category-rules.md
+│   ├── income-category-rules.md
+│   └── transfer-categories.md        ← 转账分类（仅 Transfer）
 └── Accounts/
     └── account-list.md               ← 账户定义
 ```
@@ -280,6 +343,7 @@ Transactions/incomes/2026-06-01-freelancing-500-USD-ACTIVE.md
 - [[Account List]] — 账户余额查询
 - [[Expense Categories]] — 支出分类完整说明
 - [[Income Categories]] — 收入分类完整说明
+- [[Transfer Categories]] — 转账分类说明
 - [[expense-category-rules.md]] — 分类关键词映射（表格形式）
 - [[income-category-rules.md]] — 收入分类关键词映射（表格形式）
 
