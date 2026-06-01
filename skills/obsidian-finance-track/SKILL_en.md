@@ -1,5 +1,6 @@
 ---
 name: obsidian-finance-track
+tagline: 你的 AI 理财搭档 · Your AI Finance Partner
 description: >
   Obsidian Personal Finance Tracking AI Agent Skill. Load this skill when the user describes
   accounting-related content (expenses, income, transfers, wallet balance, salary, shopping, etc.)

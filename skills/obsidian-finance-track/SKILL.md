@@ -1,5 +1,6 @@
 ---
 name: obsidian-finance-track
+tagline: 你的 AI 理财搭档 · Your AI Finance Partner
 description: >
   Obsidian 个人财务追踪 AI Agent Skill。当用户描述记账相关的内容（支出、收入、转账、钱包余额、工资、消费等）时，
   或明确说"记账"、"记一笔"、"花了多少"、"收到"等触发词时，加载此 Skill。
