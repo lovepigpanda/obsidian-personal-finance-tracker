@@ -56,12 +56,12 @@ GitHub 仓库（技能代码，可分发）
 - ✅ **分类自动映射** — 输入关键词自动 suggest 分类
 
 ### 内部一致性校验 🐍
-- ✅ **单笔校验** — AI Agent 写完每笔交易后自动跑（步骤 7.5）
-- ✅ **每日守恒** — 配对完整 / 守恒 / 余额自洽 / 透支检查
-- ✅ **周度结构** — Dataview 仪表盘 vs Python 余额对照
+- ✅ **单笔校验** — AI Agent 写完每笔交易后**自动跑**（步骤 7.5，Agent 责任）
+- ✅ **每日守恒** — Agent 自己在会话开始时判断跑不跑（不依赖系统 cron）
+- ✅ **周度结构** — Dataview 仪表盘 vs Python 余额对照，Agent 周日主动跑
 - ✅ **零依赖** — 纯 Python 3.8+ 标准库，所有平台/所有 AI Agent 可用
 - ✅ **软告警** — 文件保留，AI Agent 询问用户怎么处理
-- ✅ **多渠道通知** — alerts.md + 桌面通知 + 可选 webhook
+- ✅ **多渠道通知** — alerts.md + 桌面通知（脚本负责），飞书/微信/邮件（Agent 自己的通道）
 
 ### 用户体验
 - ✅ **月度汇总报告** — Dataview 自动生成
@@ -99,17 +99,19 @@ status: ACTIVE
 
 ---
 
-## 🐍 内部一致性校验（scripts/）
+## 🐍 内部一致性校验（scripts/）— Agent 主动调用
 
 **为什么需要？** 用户只输入初始余额，所有加减都是项目自己处理——一旦内部计算错（转账配对丢失、字段填错），余额就不准了。校验脚本保证**项目自己算的不会错**。
 
+**核心定位**: 脚本是**Agent 调用的工具**，**不是**独立服务。Agent 在合适的时候主动调脚本，**不**依赖系统 cron、**不**配 webhook——通知也由 Agent 用自己已有的通道主动推。
+
 ### 三个核心脚本
 
-| 脚本 | 何时跑 | 校验内容 |
-|------|--------|---------|
-| `validate_transaction.py` | AI Agent 写完每笔后立即调用 | 必填字段、金额合法、日期合法、币种合法、账户已注册、**transfer 配对完整且一致** |
-| `daily_integrity_check.py` | 每天定时（cron/launchd/GitHub Actions） | 转账配对守恒、每币种 transfer 平衡、Python 余额 vs 累加自洽、透支检查 |
-| `weekly_dashboard_check.py` | 每周定时 | 仪表盘文件结构、账户表完整、打印权威余额供对账 |
+| 脚本 | Agent 何时调 | 校验内容 |
+|------|------------|---------|
+| `validate_transaction.py` | **每次记账后立即**（步骤 7.5，Agent 责任） | 必填字段、金额合法、日期合法、币种合法、账户已注册、**transfer 配对完整且一致** |
+| `daily_integrity_check.py` | **Agent 自己在会话开始时判断**（不依赖系统 cron） | 转账配对守恒、每币种 transfer 平衡、Python 余额 vs 累加自洽、透支检查 |
+| `weekly_dashboard_check.py` | **Agent 周日 8 点主动调** | 仪表盘文件结构、账户表完整、打印权威余额供对账 |
 
 ### 用法
 
@@ -124,17 +126,16 @@ python3 ~/Project/obsidian-personal-finance-tracker/scripts/daily_integrity_chec
 python3 ~/Project/obsidian-personal-finance-tracker/scripts/weekly_dashboard_check.py
 ```
 
-### 通知渠道（自动启用）
+### 通知渠道
+
+**脚本只做最基础的**（无需配置）：
 
 1. **`~/Obsidian/finance/Dashboards/alerts.md`** — 始终写入，在 Obsidian 里看
 2. **桌面通知** — macOS `osascript` / Linux `notify-send`
-3. **Webhook 推送（可选）** — 配环境变量启用 Bark / PushPlus / Server酱 / 通用
 
-### 定时任务（推荐配置）
+**其他渠道（飞书 / 微信 / 邮件 / 短信）由 Agent 负责**——Agent 用自己已有的消息通道主动推。详见 [zh/AGENTS-PROACTIVE.md](zh/AGENTS-PROACTIVE.md)。
 
-**macOS launchd** 或 **crontab** 或 **GitHub Actions**——任选一种。详见 [SKILL.md 校验脚本章节](skills/obsidian-finance-track/SKILL.md)
-
-> **关键设计**：单笔校验由 AI Agent 主动调用（覆盖 80% 场景），系统 cron 兜底（覆盖 100%——包括用户手动用 Templater 录的场景）。
+> **关键设计**：校验脚本不依赖系统 cron / launchd / GitHub Actions——**全部由 Agent 主动调用**。用户**不需要**配定时任务，那是 Agent 的事。
 
 ---
 
@@ -166,6 +167,7 @@ obsidian-personal-finance-tracker/        ← GitHub 仓库（技能代码）
 ├── skills/obsidian-finance-track/        ← 🤖 AI Agent 技能（中英双版 SKILL.md）
 ├── zh/                                   # 🌏 中文版
 │   ├── AGENTS.md                         # AI Agent 使用指南
+│   ├── AGENTS-PROACTIVE.md               # Agent 主动行为指南（Onboarding + 周期检查 + 主动建议）
 │   ├── QUICK-REFERENCE.md                # 快速参考
 │   ├── Templates/                        # 模板文件（expense/income/transfer）
 │   ├── Dashboards/                       # Dataview 仪表盘 + alerts.md
@@ -216,14 +218,23 @@ aweskill agent add --agent claude-code skill obsidian-finance-track
 4. 打开 `~/Obsidian/finance/Dashboards/finance-dashboard.md` 查看财务概况
 5. 校验异常会在 `~/Obsidian/finance/Dashboards/alerts.md` 显示
 
-### 配置自动校验（可选但推荐）
+### 🤖 Agent 主动行为 (Onboarding + 周期检查 + 主动建议)
 
-校验脚本支持 3 种调用方式，覆盖从纯手到全自动的所有场景：
+**这个项目的核心定位**：所有用户都有 AI Agent，所以 Agent **不是计算器，是管家**。
 
-**方式 1：AI Agent 自动调（推荐，覆盖 80% 场景）**
-SKILL.md 步骤 7.5 已经写明——AI Agent 写完每笔交易后自动跑 `validate_transaction.py`，无需配置。
+用户装好技能后，Agent 会在第一次会话主动引导完整 7 步 Onboarding（确认 vault、引导填账户、配置校验策略、配置通知偏好等），结果存到 `~/Obsidian/finance/Accounts/agent-config.md`。
 
-**方式 2：手...[truncated]
+之后 Agent 会：
+- **每次会话开始**主动检查 vault 健康
+- **每次记账后**自动跑 `validate_transaction.py`（步骤 7.5）
+- **每日**主动跑 `daily_integrity_check.py`（不依赖系统 cron，Agent 自己判断"该跑了吗"）
+- **每周日**主动跑 `weekly_dashboard_check.py` 并总结本周财务
+- **每月 1 号**主动给上月总结 + 预算建议
+- **校验失败**时用 Agent 自己的通道（飞书/微信/邮件）主动推给用户
+
+**不要**让用户去配 cron / launchd / GitHub Actions / webhook / Bark key——那都是 Agent 的事。
+
+完整行为规则见 [zh/AGENTS-PROACTIVE.md](zh/AGENTS-PROACTIVE.md)（英文：[en/AGENTS-PROACTIVE.md](en/AGENTS-PROACTIVE.md)）。
 
 ---
 
@@ -259,6 +270,7 @@ SKILL.md 步骤 7.5 已经写明——AI Agent 写完每笔交易后自动跑 `v
 - 适配更多 AI Agent 框架
 - 多语言翻译（zh/en 已完成，欢迎其他语言）
 - 新增功能（Dataloom 视图、移动端优化等）
+- **Agent 主动策略**（[AGENTS-PROACTIVE.md](zh/AGENTS-PROACTIVE.md)）—— 贡献新场景、新触发器、新建议规则
 
 ---
 
@@ -332,12 +344,12 @@ Local Obsidian vault (ledger data, private)
 - ✅ **Automatic category mapping** — keyword input auto-suggests categories
 
 ### Internal Consistency Validation 🐍
-- ✅ **Per-transaction validation** — AI Agent runs after each write (Step 7.5)
-- ✅ **Daily conservation check** — pair integrity / currency conservation / balance self-consistency / overdraft
-- ✅ **Weekly structure check** — Dataview dashboard vs Python balance cross-check
-- ✅ **Zero dependencies** — pure Python 3.8+ stdlib, all platforms / all AI Agents
-- ✅ **Soft alert** — file preserved, AI Agent asks user how to handle
-- ✅ **Multi-channel notification** — alerts.md + desktop + optional webhooks
+- ✅ **Per-transaction validation** — AI Agent runs **immediately after each write** (Step 7.5, Agent's responsibility)
+- ✅ **Daily conservation check** — Agent itself decides at session start whether to run (no system cron)
+- ✅ **Weekly structure check** — Dataview dashboard vs Python balance cross-check, Agent proactively runs on Sundays
+- ✅ **Zero dependencies** — pure Python 3.8+ standard library, works on all platforms / all AI Agents
+- ✅ **Soft alerts** — files preserved, AI Agent asks user how to handle
+- ✅ **Multi-channel notifications** — alerts.md + desktop notifications (scripts), Feishu / WeChat / email (Agent's own channel)
 
 ### User Experience
 - ✅ **Monthly summary reports** — auto-generated via Dataview
@@ -384,8 +396,8 @@ See [en/AGENTS.md Example 5](en/AGENTS.md) and [en/Templates/transfer-template.m
 | Script | When | Validates |
 |--------|------|-----------|
 | `validate_transaction.py` | AI Agent calls after each write | Required fields, valid amount, valid date, valid currency, account registered, **transfer pair complete & consistent** |
-| `daily_integrity_check.py` | Daily on schedule (cron/launchd/GitHub Actions) | Transfer pair integrity, per-currency transfer balance, Python balance vs accumulation self-consistency, overdraft check |
-| `weekly_dashboard_check.py` | Weekly on schedule | Dashboard file structure, account table completeness, prints authoritative balances for cross-check |
+| `daily_integrity_check.py` | Agent itself decides at session start whether to run (no system cron) | Transfer pair integrity, per-currency transfer balance, Python balance vs accumulation self-consistency, overdraft check |
+| `weekly_dashboard_check.py` | Agent proactively runs on Sundays | Dashboard file structure, account table completeness, prints authoritative balances for cross-check |
 
 ### Usage
 
@@ -400,17 +412,16 @@ python3 ~/Project/obsidian-personal-finance-tracker/scripts/daily_integrity_chec
 python3 ~/Project/obsidian-personal-finance-tracker/scripts/weekly_dashboard_check.py
 ```
 
-### Notification Channels (auto-enabled)
+### Notification Channels
+
+**Scripts do only the basics** (no configuration needed):
 
 1. **`~/Obsidian/finance/Dashboards/alerts.md`** — always written, view in Obsidian
 2. **Desktop notifications** — macOS `osascript` / Linux `notify-send`
-3. **Webhook push (optional)** — set env vars to enable Bark / PushPlus / Server酱 / generic
 
-### Scheduled Tasks (recommended)
+**Other channels (Feishu / WeChat / email / SMS) are the Agent's responsibility** — Agent uses its own existing messaging channel to push. See [en/AGENTS-PROACTIVE.md](en/AGENTS-PROACTIVE.md).
 
-**macOS launchd**, **crontab**, or **GitHub Actions** — pick one. See [SKILL.md Validation Scripts section](skills/obsidian-finance-track/SKILL_en.md)
-
-> **Key design**: per-transaction validation is called by AI Agent (covers 80%), system cron is the safety net (covers 100% — including user manually entering via Templater).
+> **Key design**: validation scripts do NOT depend on system cron / launchd / GitHub Actions — **all invoked proactively by the Agent**. Users **do NOT** need to configure scheduled tasks — that's the Agent's job.
 
 ---
 
@@ -442,6 +453,7 @@ obsidian-personal-finance-tracker/        ← GitHub repo (skill code)
 ├── skills/obsidian-finance-track/        ← 🤖 AI Agent skill (zh + en SKILL.md)
 ├── zh/                                   # 🌏 Chinese version
 │   ├── AGENTS.md                         # AI Agent guide
+│   ├── AGENTS-PROACTIVE.md               # Agent proactive behavior guide (Onboarding + periodic checks + proactive suggestions)
 │   ├── QUICK-REFERENCE.md                # Quick reference
 │   ├── Templates/                        # Templates (expense/income/transfer)
 │   ├── Dashboards/                       # Dataview dashboards + alerts.md
@@ -492,30 +504,23 @@ aweskill agent add --agent claude-code skill obsidian-finance-track
 4. Open `~/Obsidian/finance/Dashboards/finance-dashboard.md` to view financial overview
 5. Validation alerts appear in `~/Obsidian/finance/Dashboards/alerts.md`
 
-### Configure Auto-Validation (optional but recommended)
+### 🤖 Agent Proactive Behavior (Onboarding + Periodic Checks + Proactive Suggestions)
 
-Validation scripts support 3 invocation modes, covering everything from pure manual to fully automated:
+**Core positioning of this project**: every user has an AI Agent, so the Agent is **not a calculator — it's a butler**.
 
-**Mode 1: AI Agent auto-call (recommended, covers 80% of cases)**
-Already documented in SKILL.md Step 7.5 — the AI Agent auto-runs `validate_transaction.py` after writing each transaction, no config needed.
+After the user installs the skill, the Agent guides them through a complete 7-step Onboarding at the first session (confirm vault, fill account list, configure validation strategy, configure notification preferences, etc.), saving results to `~/Obsidian/finance/Accounts/agent-config.md`.
 
-**Mode 2: Manual run (one-off checks)**
-```bash
-# 任何时候手跑
-python3 ~/Project/obsidian-personal-finance-tracker/scripts/daily_integrity_check.py
-python3 ~/Project/obsidian-personal-finance-tracker/scripts/weekly_dashboard_check.py
-```
+After that, the Agent will:
+- **Every session start** — proactively check vault health
+- **After every transaction** — auto-run `validate_transaction.py` (Step 7.5)
+- **Daily** — proactively run `daily_integrity_check.py` (no system cron dependency — Agent itself checks "is it time?")
+- **Every Sunday** — proactively run `weekly_dashboard_check.py` and summarize the week
+- **First of each month** — proactively deliver last month's summary + budget suggestions
+- **On validation failure** — push to user via Agent's own channel (Feishu / WeChat / email)
 
-**Mode 3: System scheduler (covers 100%, including user manual Templater entry)**
-```bash
-# Linux/macOS crontab — daily conservation
-echo "0 6 * * * /usr/bin/python3 ~/Project/obsidian-personal-finance-tracker/scripts/daily_integrity_check.py" | crontab -
+**Do NOT** ask the user to configure cron / launchd / GitHub Actions / webhooks / Bark keys — that's the Agent's job.
 
-# macOS launchd — per-transaction (new file triggered)
-# (plist template to be added in a future release; for now, see SKILL.md for guidance)
-```
-
-> **Key design**: pick the mode that matches your workflow. Most users only need Mode 1. Add Mode 3 only if you frequently enter transactions manually via Templater (without an AI Agent in the loop).
+For complete behavior rules see [en/AGENTS-PROACTIVE.md](en/AGENTS-PROACTIVE.md) (中文：[zh/AGENTS-PROACTIVE.md](zh/AGENTS-PROACTIVE.md)).
 
 ---
 

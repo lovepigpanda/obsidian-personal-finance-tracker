@@ -175,6 +175,40 @@ Dataview 仪表盘（~/Obsidian/finance/Dashboards/finance-dashboard.md）自动
 
 ---
 
+## 🎯 Agent 定位: 主动管家, 不是被动工具
+
+**这个项目的核心定位**: 用这个项目的人都有 AI Agent, 所以 Agent **不是计算器, 是管家**。
+
+| 被动 ❌ | 主动 ✅ |
+|---------|---------|
+| 用户说"记一笔"才工作 | 会话开始就主动检查数据健康 |
+| 等用户问"这个月花了多少" | 主动说"你餐饮超预算 20%" |
+| 用户配 cron / launchd | **Agent 主动问**"要不要我帮你配每日校验?" |
+| 用户配 webhook 通知 | **Agent 用自己已有的通道**主动推送 |
+| 等用户发现错误 | 提前发现并告警 |
+
+**判断标准**: 如果一件事**用户必须主动做**才能享受, 那就是 Agent 失职。
+
+---
+
+## 🚀 步骤 0: Onboarding (新用户引导)
+
+**触发**: 用户第一次加载本技能 (或说"装好了"/"开始用")。
+
+**不要默默开始记账**。先做 7 步配置（完整内容见 [AGENTS-PROACTIVE.md](../../zh/AGENTS-PROACTIVE.md)）:
+
+1. **确认 vault 目录** — 默认 `~/Obsidian/finance`, 确认或改
+2. **验证必需文件** — 检查 Templates / Categories / Dashboards / Accounts 都在, 缺的主动帮 cp
+3. **引导填账户列表** — 问"你有哪些账户", 帮写 `Accounts/account-list.md`
+4. **配置校验策略** — 主动问"要不要我帮你配每日校验?"
+5. **配置通知偏好** — 主动问"校验失败时我用我自己的通道 (飞书/微信) 发给你, 还是写 alerts.md?"
+6. **保存配置** — 写到 `Accounts/agent-config.md` (用户可见、可改)
+7. **试一笔** — 验证整个流程通
+
+**关键**: 步骤 4 默认选**Agent 自己配** (不依赖系统 cron), 因为 Agent 在每次会话开始时自己判断"该跑了吗"。
+
+---
+
 ## 执行流程（AI Agent 标准步骤）
 
 ### 步骤 1：识别意图
@@ -470,75 +504,57 @@ python3 ~/Project/obsidian-personal-finance-tracker/scripts/validate_transaction
 
 ---
 
-## 校验脚本（scripts/）
+## 校验脚本（scripts/）— Agent 调用的工具, 不是独立服务
 
-项目自带的 Python 校验脚本，**零依赖**（仅用 Python 3.8+ 标准库）。所有用户、所有平台、所有 AI Agent 都能用。
+项目自带的 Python 校验脚本, **零依赖**（仅用 Python 3.8+ 标准库）。所有用户、所有平台、所有 AI Agent 都能用。
+
+**核心定位变化**: 脚本本身**不**自动跑、不依赖系统 cron、不发 webhook——**全部由 Agent 主动调用 + 用 Agent 自己的通道通知**。
 
 ### scripts/validate_transaction.py — 单笔校验
 
-**何时用**：AI Agent 写完每笔交易文件后立即调用（步骤 7.5）。
+**何时用**: AI Agent 写完每笔交易文件后**立即**调用（步骤 7.5）。**这是 Agent 的责任, 不是用户的**。
 
 ```bash
 python3 ~/Project/obsidian-personal-finance-tracker/scripts/validate_transaction.py <新文件路径>
 ```
 
-校验内容：必填字段、金额 > 0、日期合法、币种合法、账户已注册、**transfer 配对完整且字段一致**。
+校验内容: 必填字段、金额 > 0、日期合法、币种合法、账户已注册、**transfer 配对完整且字段一致**。
 
 ### scripts/daily_integrity_check.py — 每日守恒
 
-**何时用**：每天定时跑（cron / launchd / GitHub Actions），不依赖 AI Agent。
+**何时用**: **Agent 自己在会话开始时判断**"该跑了吗", 跑就调, 不依赖系统 cron。
 
 ```bash
 python3 ~/Project/obsidian-personal-finance-tracker/scripts/daily_integrity_check.py
 ```
 
-校验内容：
+校验内容:
 1. 所有 transfer 的 out 和 in 都成对存在（不孤立）
 2. 配对文件的 amount、currency、from_account、to_account 完全一致
 3. 每币种的 transfer_in == transfer_out（转账自洽）
 4. Python 算余额 vs 累加验证（路径 A vs 路径 B 自洽——这是核心保证）
 5. 账户透支检查（软告警）
 
-异常时**自动**写入 `~/Obsidian/finance/Dashboards/alerts.md`、发桌面通知、可选 webhook 推送。
-
 ### scripts/weekly_dashboard_check.py — 周度结构检查
+
+**何时用**: Agent 周日 8 点主动调。
 
 ```bash
 python3 ~/Project/obsidian-personal-finance-tracker/scripts/weekly_dashboard_check.py
 ```
 
-校验内容：仪表盘文件引用了所有必要字段、账户表完整、打印权威余额供用户对账 Dataview 显示。
+校验内容: 仪表盘文件引用了所有必要字段、账户表完整、打印权威余额供用户对账 Dataview 显示。
 
-### cron 配置（推荐所有人配置）
+### 通知方式 (脚本只做最基础的, Agent 做剩下的)
 
-**macOS launchd** (用户级)：
-```bash
-# 写 ~/Library/LaunchAgents/com.local.obsidian-finance-daily.plist
-# WatchPaths 监控 ~/Obsidian/finance/Transactions/ 新文件
-# 程序触发 validate_transaction.py
-```
+脚本**只**做两件事 (不依赖任何配置):
 
-**Linux/macOS crontab**：
-```cron
-# 每天早 6 点跑守恒
-0 6 * * * /usr/bin/python3 ~/Project/obsidian-personal-finance-tracker/scripts/daily_integrity_check.py
-```
+1. **`~/Obsidian/finance/Dashboards/alerts.md`** — 始终写入, 用户在 Obsidian 里看
+2. **桌面通知** — macOS `osascript` / Linux `notify-send`, 弹窗提醒
 
-**GitHub Actions**（适合把 vault 同步到 GitHub 的用户）：见 `.github/workflows/finance-check.yml`（本项目自带）
+**其他通知 (飞书 / 微信 / 邮件 / 短信) 全部由 Agent 负责**——Agent 读 alerts.md 后, 用自己已有的消息通道主动推给用户。**不要**让用户去配 webhook / 申请 Bark key / 注册 Server 酱——那是 Agent 的事, 不是用户的。
 
-> **关键设计**：单笔校验由 AI Agent 主动调用（覆盖 80% 场景），系统 cron 兜底（覆盖 100%——包括用户手动用 Templater 录的场景）。
-
-### 通知方式（自动启用）
-
-所有校验异常自动通过以下渠道通知（无需配置）：
-
-1. **`~/Obsidian/finance/Dashboards/alerts.md`** — 始终写入，用户在 Obsidian 里看
-2. **桌面通知** — macOS `osascript` / Linux `notify-send`，弹窗提醒
-3. **Webhook 推送（可选）** — 配环境变量启用：
-   - `BARK_KEY` → Bark（iOS）
-   - `PUSHPLUS_TOKEN` → PushPlus（微信）
-   - `SCT_KEY` → Server酱（微信）
-   - `OBSIDIAN_FINANCE_WEBHOOK_URL` → 通用 webhook
+详细主动行为规则见 [AGENTS-PROACTIVE.md](../../zh/AGENTS-PROACTIVE.md)。
 
 ---
 

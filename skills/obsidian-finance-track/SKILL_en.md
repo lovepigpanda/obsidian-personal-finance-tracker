@@ -182,6 +182,40 @@ Load this skill when ANY of the following conditions are met:
 
 ---
 
+## 🎯 Agent Positioning: Proactive Butler, Not Passive Tool
+
+**Core positioning of this project**: everyone using it has an AI Agent, so the Agent is **not a calculator — it's a butler**.
+
+| Passive ❌ | Proactive ✅ |
+|---------|---------|
+| Only works when user says "log something" | Actively checks data health at session start |
+| Waits for "how much did I spend this month?" | Proactively says "you exceeded food budget by 20%" |
+| User configures cron / launchd | **Agent actively asks** "shall I set up daily validation?" |
+| User configures webhook notification | **Agent uses its own channel** to push proactively |
+| Waits for user to find errors | Detects and warns ahead of time |
+
+**Rule of thumb**: if a user **must do something proactively** to benefit, the Agent has failed.
+
+---
+
+## 🚀 Step 0: Onboarding (New User Guidance)
+
+**Trigger**: User loads this skill for the first time (or says "installed" / "let's start").
+
+**Do NOT silently start logging**. First complete the 7-step configuration (full content in [AGENTS-PROACTIVE.md](../../en/AGENTS-PROACTIVE.md)):
+
+1. **Confirm vault directory** — default `~/Obsidian/finance`, confirm or change
+2. **Verify required files** — check Templates / Categories / Dashboards / Accounts exist, proactively cp any missing
+3. **Guide account list** — ask "what accounts do you have", write `Accounts/account-list.md`
+4. **Configure validation strategy** — proactively ask "shall I set up daily validation?"
+5. **Configure notification preferences** — proactively ask "on validation failure, shall I use my own channel (Feishu / WeChat) or write alerts.md?"
+6. **Save configuration** — write to `Accounts/agent-config.md` (user-visible, editable)
+7. **Try one transaction** — verify the whole pipeline works
+
+**Key**: Step 4 defaults to **Agent self-configures** (no system cron dependency), because the Agent itself checks at every session start: "is it time to run?"
+
+---
+
 ## Execution Flow (AI Agent Standard Steps)
 
 ### Step 1: Identify Intent
@@ -483,13 +517,15 @@ python3 ~/Project/obsidian-personal-finance-tracker/scripts/validate_transaction
 
 ---
 
-## Validation Scripts (scripts/)
+## Validation Scripts (scripts/) — Tools for the Agent, Not Standalone Services
 
 The project ships with zero-dependency Python validation scripts (Python 3.8+ standard library only). Works for all users, all platforms, all AI Agents.
 
+**Core positioning shift**: scripts do **NOT** auto-run, do **NOT** depend on system cron, do **NOT** send webhooks — **all of that is the Agent's responsibility**.
+
 ### scripts/validate_transaction.py — Single Transaction Validation
 
-**When**: AI Agent calls immediately after writing a transaction file (Step 7.5).
+**When**: AI Agent calls **immediately** after writing a transaction file (Step 7.5). **This is the Agent's job, not the user's**.
 
 ```bash
 python3 ~/Project/obsidian-personal-finance-tracker/scripts/validate_transaction.py <new_file_path>
@@ -499,7 +535,7 @@ Validates: required fields, amount > 0, valid date, valid currency, account regi
 
 ### scripts/daily_integrity_check.py — Daily Conservation
 
-**When**: Run on a schedule daily (cron / launchd / GitHub Actions), independent of AI Agent.
+**When**: **Agent itself decides** at session start "is it time to run?", and runs if so. No system cron dependency.
 
 ```bash
 python3 ~/Project/obsidian-personal-finance-tracker/scripts/daily_integrity_check.py
@@ -512,9 +548,9 @@ Validates:
 4. Python balance calculation vs accumulation verification (Path A vs Path B self-consistent — this is the core guarantee)
 5. Account overdraft check (soft alert)
 
-On failure: **automatically** writes to `~/Obsidian/finance/Dashboards/alerts.md`, sends desktop notification, optional webhook push.
-
 ### scripts/weekly_dashboard_check.py — Weekly Structure Check
+
+**When**: Agent proactively runs Sunday at 8 AM.
 
 ```bash
 python3 ~/Project/obsidian-personal-finance-tracker/scripts/weekly_dashboard_check.py
@@ -522,36 +558,16 @@ python3 ~/Project/obsidian-personal-finance-tracker/scripts/weekly_dashboard_che
 
 Validates: dashboard file references all required fields, account table complete, prints authoritative balances for user to cross-check Dataview display.
 
-### Cron Configuration (recommended for all users)
+### Notification Methods (scripts do the basics, Agent does the rest)
 
-**macOS launchd** (user-level):
-```bash
-# Write ~/Library/LaunchAgents/com.local.obsidian-finance-daily.plist
-# WatchPaths monitor ~/Obsidian/finance/Transactions/ for new files
-# Program triggers validate_transaction.py
-```
-
-**Linux/macOS crontab**:
-```cron
-# Daily at 6 AM run conservation check
-0 6 * * * /usr/bin/python3 ~/Project/obsidian-personal-finance-tracker/scripts/daily_integrity_check.py
-```
-
-**GitHub Actions** (for users syncing vault to GitHub): see `.github/workflows/finance-check.yml` (project-included)
-
-> **Key design**: single-transaction validation is called by AI Agent (covers 80%), system cron is the safety net (covers 100% — including user manually entering via Templater).
-
-### Notification Methods (auto-enabled)
-
-All validation failures are automatically reported via:
+The scripts do **only** two things (no configuration needed):
 
 1. **`~/Obsidian/finance/Dashboards/alerts.md`** — always written, user views in Obsidian
 2. **Desktop notification** — macOS `osascript` / Linux `notify-send`, popup alert
-3. **Webhook push (optional)** — set environment variables to enable:
-   - `BARK_KEY` → Bark (iOS)
-   - `PUSHPLUS_TOKEN` → PushPlus (WeChat)
-   - `SCT_KEY` → Server酱 (WeChat)
-   - `OBSIDIAN_FINANCE_WEBHOOK_URL` → generic webhook
+
+**All other notifications (Feishu / WeChat / email / SMS) are the Agent's job** — the Agent reads alerts.md and uses its own existing messaging channel to push to the user. **Do NOT** ask the user to configure webhooks, get Bark keys, or sign up for Server酱 — that's the Agent's job, not the user's.
+
+For detailed proactive behavior rules see [AGENTS-PROACTIVE.md](../../en/AGENTS-PROACTIVE.md).
 
 ---
 
