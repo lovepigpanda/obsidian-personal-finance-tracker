@@ -6,8 +6,8 @@ description: >
 
   支持中文和英文用户，自动解析自然语言输入，在 Obsidian vault 中创建交易 md 文件，并更新 Dataview 仪表盘。
 
-  项目文件位于：~/Project/obsidian-personal-finance-tracker/zh/（中文主要版）或 en/（英文版）
-  AI Agent 工作流：zh/AGENTS.md | 分类映射：zh/QUICK-REFERENCE.md
+  ⚠️ 技能代码与账本数据分离：技能来自 GitHub 同步，账本数据存本地 ~/Obsidian/finance/
+  详见「数据存储架构」章节。
 triggers:
   - 记账
   - 记一笔
@@ -47,18 +47,100 @@ github: https://github.com/lovepigpanda/obsidian-personal-finance-tracker
 
 ---
 
+## 数据存储架构 ⚠️ 必读
+
+**技能代码与账本数据完全分离**，这是本项目的核心设计原则：
+
+```
+GitHub 仓库                          本地 Obsidian vault（私有，不上传）
+─────────────────                    ─────────────────────────────
+obsidian-personal-finance-tracker    ~/Obsidian/finance/
+├── skills/                        ← 技能代码，同步自 GitHub
+│   └── obsidian-finance-track/
+├── zh/                            ← 模板、规则、文档（可分发）
+│   ├── AGENTS.md                  ← AI Agent 工作流
+│   ├── Templates/                 ← Templater 模板文件
+│   ├── Categories/               ← 分类规则
+│   └── Dashboards/               ← Dataview 仪表盘模板
+└── README.md                      ← 项目说明
+
+                                    ~/Obsidian/finance/
+                                    ├── Templates/             ← 本地副本（用户定制）
+                                    ├── Categories/            ← 本地副本（用户定制）
+                                    ├── Dashboards/            ← 本地副本（用户定制）
+                                    ├── Accounts/              ← 账户列表（含余额）
+                                    ├── Transactions/          ← ⭐ 你的真实账本数据
+                                    │   ├── expenses/          ← 每笔支出一个 md 文件
+                                    │   └── incomes/          ← 每笔收入一个 md 文件
+                                    └── SKILL.md              ← 本地技能副本
+```
+
+### 为什么这样设计？
+
+| 对比项 | GitHub 项目（技能） | 本地 vault（数据） |
+|--------|-------------------|-------------------|
+| 内容 | 模板、规则、脚本、说明文档 | 你的真实交易记录 |
+| 同步 | `git pull` 从 GitHub 更新 | 永远不上传，私有 |
+| 定制 | 可以提交 PR 优化通用规则 | 用户自己的账户、备注 |
+| 风险 | 误操作不会影响账本数据 | 账本数据完全隔离 |
+
+### 更新流程
+
+```bash
+# 1. 更新技能代码（从 GitHub 拉取最新模板/规则）
+git -C ~/Project/obsidian-personal-finance-tracker pull
+
+# 2. 如需将新模板同步到本地 vault，手动复制
+cp ~/Project/obsidian-personal-finance-tracker/zh/Templates/* ~/Obsidian/finance/Templates/
+
+# 3. 账本数据（~/Obsidian/finance/Transactions/）无需任何操作，完全自主
+```
+
+---
+
+## 本地 vault 路径
+
+```
+~/Obsidian/finance/
+```
+
+**目录结构：**
+
+```
+~/Obsidian/finance/
+├── Templates/                     ← Templater 模板（Templater 插件自动调用）
+│   ├── expense-template.md        ← 支出记录模板
+│   └── income-template.md         ← 收入记录模板
+├── Categories/                    ← 分类规则（AI Agent 读取）
+│   ├── expense-categories.md      ← 支出分类说明
+│   ├── expense-category-rules.md  ← 支出关键词映射
+│   ├── income-categories.md       ← 收入分类说明
+│   └── income-category-rules.md  ← 收入关键词映射
+├── Dashboards/                    ← Dataview 仪表盘
+│   └── finance-dashboard.md       ← 主仪表盘
+├── Accounts/                      ← 账户列表
+│   └── account-list.md            ← 账户名称+初始余额
+└── Transactions/                  ← ⭐ 真实账本数据（本地私有）
+    ├── expenses/                  ← 每笔支出一个 .md 文件
+    │   └── YYYY-MM-DD-*-ACTIVE.md
+    └── incomes/                   ← 每笔收入一个 .md 文件
+        └── YYYY-MM-DD-*-ACTIVE.md
+```
+
+---
+
 ## 工作原理
 
 ```
 用户自然语言输入
        ↓
-AI Agent 读取 AGENTS.md + QUICK-REFERENCE.md
+AI Agent 读取 ~/Obsidian/finance/Categories/*.md（分类规则）
        ↓
 解析字段：type / date / amount / currency / category / account / note
        ↓
-写入 Obsidian vault（~/Project/obsidian-personal-finance-tracker/zh/）
+写入 ~/Obsidian/finance/Transactions/{expenses,incomes}/
        ↓
-Dataview 仪表盘自动更新
+Dataview 仪表盘（~/Obsidian/finance/Dashboards/finance-dashboard.md）自动更新
 ```
 
 ---
@@ -101,7 +183,7 @@ Dataview 仪表盘自动更新
 
 ### 步骤 3：匹配分类
 
-读取 `QUICK-REFERENCE.md` 中的分类映射表，根据 note 关键词匹配：
+读取 `~/Obsidian/finance/Categories/expense-category-rules.md` 或 `income-category-rules.md` 中的分类映射表：
 
 **支出分类（12类）**
 
@@ -156,9 +238,9 @@ Dataview 仪表盘自动更新
 
 ### 步骤 6：创建文件
 
-**文件路径：**
-- 支出：`~/Project/obsidian-personal-finance-tracker/zh/Transactions/expenses/{filename}`
-- 收入：`~/Project/obsidian-personal-finance-tracker/zh/Transactions/incomes/{filename}`
+**文件路径（本地 vault）：**
+- 支出：`~/Obsidian/finance/Transactions/expenses/{filename}`
+- 收入：`~/Obsidian/finance/Transactions/incomes/{filename}`
 
 **文件内容格式：**
 ```markdown
@@ -191,9 +273,9 @@ created: 2026-06-01
 ### 步骤 7：确认完成
 
 告诉用户：
-- 文件路径
+- 文件路径：`~/Obsidian/finance/Transactions/expenses/{filename}`
 - 主要内容（type、amount、category、account）
-- 可在 Dataview 仪表盘查看汇总
+- 可在 Dataview 仪表盘 `~/Obsidian/finance/Dashboards/finance-dashboard.md` 查看汇总
 
 ---
 
@@ -211,7 +293,7 @@ created: 2026-06-01
 4. account = Alipay
 5. 关键词"午餐、沙县" → category = Food
 6. note = "午餐-沙县小吃"
-7. 创建文件：`Transactions/expenses/2026-06-01-lunch-45-CNY-ACTIVE.md`
+7. 创建文件：`~/Obsidian/finance/Transactions/expenses/2026-06-01-lunch-45-CNY-ACTIVE.md`
 
 ### 示例 2：收入
 
@@ -225,7 +307,7 @@ created: 2026-06-01
 4. account = CMB
 5. 关键词"工资" → category = Salary
 6. note = "6月工资"
-7. 创建文件：`Transactions/incomes/2026-06-01-salary-15000-CNY-ACTIVE.md`
+7. 创建文件：`~/Obsidian/finance/Transactions/incomes/2026-06-01-salary-15000-CNY-ACTIVE.md`
 
 ### 示例 3：多币种支出
 
@@ -239,7 +321,7 @@ created: 2026-06-01
 4. account = Credit Card
 5. 关键词"书" → category = Education
 6. note = "技术书-亚马逊"
-7. 创建文件：`Transactions/expenses/2026-06-01-book-35-USD-ACTIVE.md`
+7. 创建文件：`~/Obsidian/finance/Transactions/expenses/2026-06-01-book-35-USD-ACTIVE.md`
 
 ---
 
@@ -252,33 +334,50 @@ created: 2026-06-01
 5. **多币种**：按用户描述如实记录，不转换
 6. **关键词匹配**：精准词优先（如"沙县"→Food），再宽泛词（如"其他"→Other）
 7. **默认账户**：用户未指定则默认 Alipay（支出）或 CMB（收入）
-8. **文件位置**：`~/Project/obsidian-personal-finance-tracker/zh/`（中文用户）或 `en/`（英文用户）
+8. **文件位置**：统一在 `~/Obsidian/finance/Transactions/`
 
 ---
 
-## 项目文件路径
+## 本地文件路径速查
 
 | 文件 | 路径 |
 |------|------|
 | AI Agent 工作流 | `~/Project/obsidian-personal-finance-tracker/zh/AGENTS.md` |
 | 分类/账户映射 | `~/Project/obsidian-personal-finance-tracker/zh/QUICK-REFERENCE.md` |
-| 支出分类规则 | `~/Project/obsidian-personal-finance-tracker/zh/Categories/expense-category-rules.md` |
-| 收入分类规则 | `~/Project/obsidian-personal-finance-tracker/zh/Categories/income-category-rules.md` |
-| 仪表盘 | `~/Project/obsidian-personal-finance-tracker/zh/Dashboards/finance-dashboard.md` |
-| 账户列表 | `~/Project/obsidian-personal-finance-tracker/zh/Accounts/account-list.md` |
-| 支出模板 | `~/Project/obsidian-personal-finance-tracker/zh/Templates/expense-template.md` |
-| 收入模板 | `~/Project/obsidian-personal-finance-tracker/zh/Templates/income-template.md` |
+| 支出分类规则 | `~/Obsidian/finance/Categories/expense-category-rules.md` |
+| 收入分类规则 | `~/Obsidian/finance/Categories/income-category-rules.md` |
+| 仪表盘 | `~/Obsidian/finance/Dashboards/finance-dashboard.md` |
+| 账户列表 | `~/Obsidian/finance/Accounts/account-list.md` |
+| 支出模板 | `~/Obsidian/finance/Templates/expense-template.md` |
+| 收入模板 | `~/Obsidian/finance/Templates/income-template.md` |
+| **账本数据** | `~/Obsidian/finance/Transactions/{expenses,incomes}/` |
 
 ---
 
-## 相关文件
+## 首次安装说明
 
-- [[Finance Dashboard]] — 仪表盘查看所有交易汇总
-- [[Account List]] — 账户余额查询
-- [[Expense Categories]] — 支出分类完整说明
-- [[Income Categories]] — 收入分类完整说明
-- [[expense-category-rules.md]] — 分类关键词映射表
-- [[income-category-rules.md]] — 收入分类关键词映射表
+如果你是从 GitHub 首次安装，请按以下步骤操作：
+
+```bash
+# 1. 克隆项目到本地
+git clone https://github.com/lovepigpanda/obsidian-personal-finance-tracker.git ~/Project/obsidian-personal-finance-tracker
+
+# 2. 在 Obsidian vault 中创建 finance 目录
+mkdir -p ~/Obsidian/finance/{Templates,Categories,Dashboards,Accounts,Transactions/{expenses,incomes}}
+
+# 3. 复制模板和规则文件到 vault
+cp ~/Project/obsidian-personal-finance-tracker/zh/Templates/*.md ~/Obsidian/finance/Templates/
+cp ~/Project/obsidian-personal-finance-tracker/zh/Categories/*.md ~/Obsidian/finance/Categories/
+cp ~/Project/obsidian-personal-finance-tracker/zh/Dashboards/*.md ~/Obsidian/finance/Dashboards/
+cp ~/Project/obsidian-personal-finance-tracker/zh/Accounts/*.md ~/Obsidian/finance/Accounts/
+
+# 4. 安装技能到各 AI Agent
+aweskill install https://github.com/lovepigpanda/obsidian-personal-finance-tracker
+aweskill agent add --agent openclaw skill obsidian-finance-track
+aweskill agent add --agent claude-code skill obsidian-finance-track
+```
+
+> 注意：`Transactions/` 目录不要从 GitHub 复制——它是你的私人账本。
 
 ---
 
