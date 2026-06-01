@@ -1,6 +1,6 @@
 # Obsidian Personal Finance Tracker
 
-> 简体中文 | [English](#english)
+### 🤖 你的 AI 理财搭档 · Your AI Finance Partner
 
 ---
 
@@ -155,6 +155,8 @@ MIT License
 <a name="english"></a>
 
 # Obsidian Personal Finance Tracker
+
+### 🤖 你的 AI 理财搭档 · Your AI Finance Partner
 
 > [简体中文](#简体中文) | English
 
