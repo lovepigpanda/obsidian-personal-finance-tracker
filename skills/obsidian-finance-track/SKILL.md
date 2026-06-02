@@ -9,7 +9,21 @@ description: >
 
   ⚠️ 技能代码与账本数据分离：技能来自 GitHub 同步，账本数据存本地 ~/Obsidian/finance/
   详见「数据存储架构」章节。
+
+  🚨 首次加载强制入口：当用户说"装好了"/"开始用"/"设置记账"/"初始化"等关键词，
+  或 vault 目录缺少 `Accounts/agent-config.md` 时，**必须**立即执行「Onboarding 7 步」，
+  不能直接进入记账流程。未完成 Onboarding = 未真正启用本技能。
 triggers:
+  # === 初始化触发词（首次使用）===
+  - 装好了
+  - 开始用
+  - 初始化
+  - 设置记账
+  - 配置记账
+  - onboard
+  - setup
+  - initialize
+  # === 记账触发词 ===
   - 记账
   - 记一笔
   - 花了
@@ -44,7 +58,7 @@ triggers:
   - balance
   - 余额
   - 账户
-version: V1.1
+version: V1.1.2
 status: ACTIVE
 tags: [finance, obsidian, accounting, agent, nlp]
 author: lovepigpanda
@@ -54,6 +68,39 @@ github: https://github.com/lovepigpanda/obsidian-personal-finance-tracker
 # Obsidian Finance Track — AI Agent 记账技能
 
 > 本 Skill 驱动 AI Agent 完成自然语言记账：解析用户输入 → 匹配分类/账户 → 创建 md 交易文件 → 更新仪表盘
+
+---
+
+## 🚨 强制入口：Onboarding 状态检查（AI Agent 必读）
+
+**加载本 Skill 后第一件事** —— 在做任何记账操作之前：
+
+```python
+# 伪代码: 任何 agent 加载本技能后必须执行
+vault = os.path.expanduser("~/Obsidian/finance")
+config_file = os.path.join(vault, "Accounts/agent-config.md")
+
+if not os.path.exists(config_file):
+    # ⚠️ 哨兵文件不存在 = 未初始化
+    print("⚠️ 检测到首次使用本技能，必须先完成 Onboarding")
+    # 立即跳转「步骤 0: Onboarding」章节 (L194+)
+    # 不要执行任何记账/校验/总结操作
+else:
+    # 已初始化，正常进入记账流程
+    pass
+```
+
+**为什么这是强制的**：
+
+| 情况 | 后果 |
+|------|------|
+| 用户没初始化就记账 | 账户列表为空 → 校验失败；定时任务没配 → Agent 不会主动提醒；用户享受不到 #23–#36 的主动功能 |
+| 初始化但跳过定时任务 | Agent 只能"被动等用户开会话"，会话外无法主动通知（违反 Agent 是主动管家的定位） |
+| **Onboarding 7 步 = 启用本技能的必要条件**，不是可选项 | 任何 agent 跳过 Onboarding = 本次加载视为失败 |
+
+**Onboarding 完成判定**：`Accounts/agent-config.md` 文件存在且包含 `onboarded: true` 字段。
+
+**已完成 Onboarding 的用户如何再次访问配置？** — 直接说 "重新配置" / "重做 Onboarding"，agent 应重新走 7 步（**先备份现有 config**）。
 
 ---
 
@@ -207,8 +254,51 @@ Dataview 仪表盘（~/Obsidian/finance/Dashboards/finance-dashboard.md）自动
    - **每日 8:00** 跑 credit_card_reminder.py (信用卡临近账单日/还款日时提醒, #23)
    - **每日 8:05** 跑 installment_check.py (分期 PENDING 到期检查, #24)
 5. **配置通知偏好** — 主动问"校验失败时我用我自己的通道 (飞书/微信) 发给你, 还是写 alerts.md?"
-6. **保存配置** — 写到 `Accounts/agent-config.md` (用户可见、可改)
+6. **保存配置 + 写哨兵** — 写到 `Accounts/agent-config.md` (用户可见、可改), **必须** 包含 `onboarded: true` 字段。模板见下方。
 7. **试一笔** — 验证整个流程通
+
+**`Accounts/agent-config.md` 模板** (Agent 主动生成, 用户确认):
+
+```markdown
+---
+title: Agent Configuration
+type: agent-config
+onboarded: true
+onboarded_at: 2026-06-02
+agent_name: Hermes
+notification_channel: feishu   # feishu | wechat | alerts-md
+vault_path: ~/Obsidian/finance
+scheduled_tasks:
+  - time: "18:00"
+    script: daily_integrity_check.py
+    enabled: true
+  - time: "20:00"
+    script: weekly_summary.py
+    weekday: sunday
+    enabled: true
+  - time: "21:00"
+    script: monthly_summary.py
+    day: last
+    enabled: true
+  - time: "08:00"
+    script: credit_card_reminder.py
+    enabled: true
+  - time: "08:05"
+    script: installment_check.py
+    enabled: true
+---
+
+# AI Agent 配置
+
+> 本文件由 AI Agent 在 Onboarding 时生成, 用户可手动修改。
+> **重要**: `onboarded: true` 是 Onboarding 完成哨兵, 删除它 = 强制重做 Onboarding。
+> 修改后请告知 Agent, 让它重新校验配置完整性。
+```
+
+**为什么不只靠 `agent-config.md` 存在判断**:
+- 用户可能误删文件 → 哨兵丢失 → 强制重做 Onboarding (保护性)
+- 用户可能改坏内容 → 缺 `onboarded: true` 字段 → 强制重做
+- 只有 "文件存在 + onboarded: true + 5 个 scheduled_tasks 都 enabled" 才算真正完成
 
 **为什么需要定时任务**:
 - Agent 只在**用户开会话**时才在线。会话关了, Agent 就"睡"了。
