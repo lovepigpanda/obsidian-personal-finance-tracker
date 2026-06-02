@@ -184,11 +184,22 @@ def check_balances_self_consistent(vault_root: str) -> list:
 def check_negative_balances(vault_root: str) -> list:
     """
     检查账户余额为负数 (可能透支)。
+
+    ⚠️ 豁免以下账户类型 (它们的余额**本应**是负数):
+    - credit-card: 信用卡, 负数=欠款
+    - loan: 贷款账户, 负数=未还本金
     """
     errors = []
     balances = compute_balances(vault_root)
+    accounts = parse_accounts(vault_root)
+
     for (acc, ccy), bal in balances.items():
         if bal < -0.01:
+            # 检查账户类型, 豁免正常负债账户
+            acc_type = accounts.get(acc, {}).get("type", "")
+            if acc_type in ("credit-card", "loan"):
+                # 负债账户, 负数正常, 跳过透支检查
+                continue
             errors.append((
                 "WARN",
                 f"账户 {acc} ({ccy}) 余额为负: {bal:.2f}",

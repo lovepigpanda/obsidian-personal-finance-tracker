@@ -140,6 +140,10 @@ def parse_accounts(vault_root: str) -> Dict[str, Dict]:
         - 账单日 / Statement Day                    -> statement_day (int, 信用卡)
         - 还款日 / Due Day                          -> due_day (int, 信用卡)
         - 信用额度 / Credit Limit                  -> credit_limit
+        - 贷款总额 / Principal                      -> principal (float, 贷款账户)
+        - 月供 / Monthly Payment                    -> monthly_payment (float, 贷款账户)
+        - 剩余期数 / Remaining Months              -> remaining_months (int, 贷款账户)
+        - 起始月 / Start Month                      -> start_month (YYYY-MM, 贷款账户)
     """
     acc_file = find_accounts_file(vault_root)
     if not acc_file:
@@ -156,6 +160,10 @@ def parse_accounts(vault_root: str) -> Dict[str, Dict]:
         "statement_day": ["账单日", "Statement Day", "Statement"],
         "due_day": ["还款日", "Due Day", "Due"],
         "credit_limit": ["信用额度", "Credit Limit", "Limit"],
+        "principal": ["贷款总额", "Principal", "Loan Amount"],
+        "monthly_payment": ["月供", "Monthly Payment", "Payment"],
+        "remaining_months": ["剩余期数", "Remaining Months", "Months Left"],
+        "start_month": ["起始月", "Start Month", "Start"],
     }
 
     header_cols = []  # 头部: [(role, idx), ...]
@@ -201,6 +209,12 @@ def parse_accounts(vault_root: str) -> Dict[str, Dict]:
             except ValueError:
                 return None
 
+        def _float(s):
+            try:
+                return float(s) if s and s != "-" else None
+            except ValueError:
+                return None
+
         accounts[name] = {
             "currency": currency,
             "type": row.get("type", ""),
@@ -208,6 +222,10 @@ def parse_accounts(vault_root: str) -> Dict[str, Dict]:
             "statement_day": _int(row.get("statement_day", "")),
             "due_day": _int(row.get("due_day", "")),
             "credit_limit": _int(row.get("credit_limit", "")),
+            "principal": _float(row.get("principal", "")),
+            "monthly_payment": _float(row.get("monthly_payment", "")),
+            "remaining_months": _int(row.get("remaining_months", "")),
+            "start_month": row.get("start_month", "") or None,
             "row": cells,
         }
     return accounts

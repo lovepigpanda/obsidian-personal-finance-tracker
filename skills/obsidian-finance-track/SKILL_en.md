@@ -63,7 +63,7 @@ triggers:
   - balance
   - 余额
   - 账户
-version: V1.1.2
+version: V1.2
 status: ACTIVE
 tags: [finance, obsidian, accounting, agent, nlp]
 author: lovepigpanda
@@ -292,6 +292,9 @@ scheduled_tasks:
     enabled: true
   - time: "08:05"
     script: installment_check.py
+    enabled: true
+  - time: "08:10"
+    script: loan_payment_reminder.py
     enabled: true
 ---
 
@@ -684,6 +687,30 @@ Validates:
 - Groups all installment expenses by `installment_group_id`
 - Validates ① total count ② field consistency (amount/currency/account/category) ③ PENDING due date ④ orphan installments (1 item but marked as installment)
 - Writes to `alerts.md`
+
+### scripts/loan_payment_reminder.py — Loan Payment Reminder (#37)
+
+**When**: Agent helps user configure daily 8:10 scheduled task (5 min after installment check).
+
+```bash
+python3 ~/Project/obsidian-personal-finance-tracker/scripts/loan_payment_reminder.py --vault ~/Obsidian/finance
+```
+
+**Trigger condition**: Detects `type: loan` accounts in `Accounts/account-list.md`.
+
+**Validation**:
+- Loan account required field check (Principal / Monthly Payment / Remaining Months / Start Month); missing fields → INFO
+- Next payment date: last day of start month, then same day each subsequent month (auto-handles 2-day count)
+- **≤5 days**: WARN ("Payment approaching, amount X")
+- **Overdue ≤3 days, not recorded**: ERROR ("Payment X days overdue, not yet recorded!")
+- **Overdue 4+ days, not recorded**: ERROR ("Severely overdue")
+- **Current month paid**: INFO ("Paid, next payment...")
+
+**Supports 4 loan fields** (zh + en): `贷款总额/Principal` / `月供/Monthly Payment` / `剩余期数/Remaining Months` / `起始月/Start Month`
+
+**Companion**: `monthly_summary.py` auto-adds "💳 Loan account progress" section to monthly reports (principal / paid / percentage / remaining months)
+
+---
 
 ### scripts/installment_helper.py — Installment Template Generator (#24)
 

@@ -2,7 +2,7 @@
 title: Account List — Account Definitions
 created: 2026-06-01
 updated: 2026-06-01
-version: V1.0
+version: V1.2
 status: ACTIVE
 type: account-list
 tags: [finance, accounts]
@@ -12,19 +12,29 @@ tags: [finance, accounts]
 
 > Account balances are auto-calculated by Dataview (initial balance + income − expenses). No manual update needed.
 
-| Account | Type | Currency | Initial Balance | Statement Day | Due Day | Credit Limit | Note | Status |
-|---------|------|----------|-----------------|---------------|---------|--------------|------|--------|
-| Cash | cash | CNY | 0 | - | - | - | Cash | ACTIVE |
-| Alipay | e-wallet | CNY | 0 | - | - | - | Alipay | ACTIVE |
-| WeChat Pay | e-wallet | CNY | 0 | - | - | - | WeChat Pay | ACTIVE |
-| CMB | bank | CNY | 0 | - | - | - | China Merchants Bank | ACTIVE |
-| ICBC | bank | CNY | 0 | - | - | - | Industrial and Commercial Bank | ACTIVE |
-| Credit Card | credit-card | CNY | 0 | - | - | - | Credit Card (negative = debt) | ACTIVE |
-| USD Account | bank | USD | 0 | - | - | - | USD Account | ACTIVE |
+| Account | Type | Currency | Initial Balance | Statement Day | Due Day | Credit Limit | Principal | Monthly Payment | Remaining Months | Start Month | Note | Status |
+|---------|------|----------|-----------------|---------------|---------|--------------|-----------|-----------------|------------------|-------------|------|--------|
+| Cash | cash | CNY | 0 | - | - | - | - | - | - | - | Cash | ACTIVE |
+| Alipay | e-wallet | CNY | 0 | - | - | - | - | - | - | - | Alipay | ACTIVE |
+| WeChat Pay | e-wallet | CNY | 0 | - | - | - | - | - | - | - | WeChat Pay | ACTIVE |
+| CMB | bank | CNY | 0 | - | - | - | - | - | - | - | China Merchants Bank | ACTIVE |
+| ICBC | bank | CNY | 0 | - | - | - | - | - | - | - | Industrial and Commercial Bank | ACTIVE |
+| Credit Card | credit-card | CNY | 0 | - | - | - | - | - | - | - | Credit Card (negative = debt) | ACTIVE |
+| USD Account | bank | USD | 0 | - | - | - | - | - | - | - | USD Account | ACTIVE |
+| Mortgage | loan | CNY | 0 | - | - | - | 1000000 | 8500 | 240 | 2024-01 | Mortgage (negative = unpaid principal) | ACTIVE |
 
 > **Credit Card note**: Statement Day is when bill is issued, Due Day is the last day to pay (typically 20 days after statement). `#23` proactive reminder depends on these two fields.
 > Example (CMB): Statement Day 5, Due Day 25.
 > When adding a credit card account, **must** fill Statement Day + Due Day, otherwise no reminder.
+
+> **Loan account note** (V1.2 new): Type is `loan`, balance **should be** negative (= unpaid principal). `#37` proactive reminder depends on these 4 fields.
+> Loan account fields:
+> - **Principal**: Original loan amount
+> - **Monthly Payment**: Amount to pay each month
+> - **Remaining Months**: How many months left
+> - **Start Month**: YYYY-MM format, the month of the **first** payment; subsequent payments are on the same day each month
+> To make a payment = create a regular expense transaction with account=loan account, amount=monthly payment. The script auto-detects whether the current month is paid and whether it's overdue.
+> Example (mortgage): 2024-01 start, payment 8500, 240 months left → 1st payment 2024-01-31, 2nd 2024-02-29 (auto-handles 2-day count), 3rd 2024-03-31...
 
 ---
 

@@ -429,5 +429,6 @@ V1.0 defined the *principle* of being proactive; V1.1 turns it into 6 **concrete
 
 ## 🔄 Version
 
+- **V1.2** (2026-06-02) — Added #37 loan account (loan type, 4 fields: Principal/Monthly Payment/Remaining Months/Start Month) + loan_payment_reminder.py payment reminder + monthly_summary.py adds "Loan account progress" section + check_negative_balances exempts loan/credit-card
 - **V1.1** (2026-06-02) — Added 6 proactive behaviors (#23 credit card / #24 installment / #33 frequency / #34 inactivity / #35 weekly / #36 monthly); upgraded Onboarding Step 4 to 5 scheduled tasks
 - **V1.0** (2026-06-01) — Initial release, defined Agent proactive behavior principles

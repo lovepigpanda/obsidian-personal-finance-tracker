@@ -39,6 +39,48 @@ def month_range(year: int, month: int) -> tuple:
     return start, end
 
 
+def _format_loan_progress(vault_root: str) -> list:
+    """
+    格式化贷款账户进度 (V1.2, #37)。
+
+    对每个 type=loan 账户:
+    - principal: 贷款总额
+    - 已还: principal - |当前余额| (余额是负的, 所以未还本金=|余额|)
+    - 进度: 已还 / principal
+    - 月供: 展示下次月供日和当月是否已还
+    """
+    accounts = parse_accounts(vault_root)
+    balances = compute_balances(vault_root)
+    today = date.today()
+
+    loan_lines = []
+    has_loan = False
+    for acc_name, acc in accounts.items():
+        if acc.get("type") != "loan":
+            continue
+        has_loan = True
+        principal = acc.get("principal") or 0
+        monthly = acc.get("monthly_payment") or 0
+        remaining_months = acc.get("remaining_months") or 0
+        currency = acc.get("currency", "CNY")
+
+        # 当前未还本金 = -余额 (余额是负的)
+        current_balance = balances.get((acc_name, currency), 0)
+        unpaid_principal = abs(current_balance) if current_balance < 0 else 0
+        paid_principal = principal - unpaid_principal
+        progress = (paid_principal / principal * 100) if principal > 0 else 0
+
+        loan_lines.append(
+            f"  {acc_name} ({currency}): "
+            f"贷款总额 {principal:.2f} / 已还 {paid_principal:.2f} "
+            f"({progress:.1f}%) / 剩余期数 {remaining_months}"
+        )
+
+    if not has_loan:
+        return []
+    return ["💳 贷款账户进度:"] + loan_lines
+
+
 def collect_period(vault_root: str, start: date, end: date) -> dict:
     out = {
         "tx_count": 0,
@@ -131,6 +173,12 @@ def build_summary(vault_root: str, year: int, month: int) -> str:
             tout = period["transfer_out_total"].get(ccy, 0)
             tin = period["transfer_in_total"].get(ccy, 0)
             lines.append(f"  {ccy}: 转出 {tout:.2f} / 转入 {tin:.2f}")
+        lines.append("")
+
+    # 4.5 贷款账户进度 (V1.2 新增, #37 配合)
+    loan_lines = _format_loan_progress(vault_root)
+    if loan_lines:
+        lines.extend(loan_lines)
         lines.append("")
 
     # 5. 账户余额

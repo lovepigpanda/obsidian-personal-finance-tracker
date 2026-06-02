@@ -58,7 +58,7 @@ triggers:
   - balance
   - 余额
   - 账户
-version: V1.1.2
+version: V1.2
 status: ACTIVE
 tags: [finance, obsidian, accounting, agent, nlp]
 author: lovepigpanda
@@ -253,6 +253,7 @@ Dataview 仪表盘（~/Obsidian/finance/Dashboards/finance-dashboard.md）自动
    - **每月最后一日 21:00** 跑 monthly_summary.py (#36 月末自检)
    - **每日 8:00** 跑 credit_card_reminder.py (信用卡临近账单日/还款日时提醒, #23)
    - **每日 8:05** 跑 installment_check.py (分期 PENDING 到期检查, #24)
+   - **每日 8:10** 跑 loan_payment_reminder.py (贷款月供提醒, #37)
 5. **配置通知偏好** — 主动问"校验失败时我用我自己的通道 (飞书/微信) 发给你, 还是写 alerts.md?"
 6. **保存配置 + 写哨兵** — 写到 `Accounts/agent-config.md` (用户可见、可改), **必须** 包含 `onboarded: true` 字段。模板见下方。
 7. **试一笔** — 验证整个流程通
@@ -285,6 +286,9 @@ scheduled_tasks:
     enabled: true
   - time: "08:05"
     script: installment_check.py
+    enabled: true
+  - time: "08:10"
+    script: loan_payment_reminder.py
     enabled: true
 ---
 
@@ -671,6 +675,30 @@ python3 ~/Project/obsidian-personal-finance-tracker/scripts/installment_check.py
 - 按 `installment_group_id` 聚合所有分期 expense
 - 校验 ① 总期数 ② 字段一致性 (amount/currency/account/category) ③ PENDING 是否到期 ④ 孤立分期 (只有 1 期但标记分期)
 - 写到 `alerts.md`
+
+### scripts/loan_payment_reminder.py — 贷款月供提醒 (#37)
+
+**何时用**: Agent 帮用户配每日 8:10 定时任务 (与 credit_card / installment 错开 5 分钟)。
+
+```bash
+python3 ~/Project/obsidian-personal-finance-tracker/scripts/loan_payment_reminder.py --vault ~/Obsidian/finance
+```
+
+**触发条件**: 检测到 `Accounts/account-list.md` 中存在 `type: loan` 的账户。
+
+**校验内容**:
+- 贷款账户必填字段检查 (贷款总额 / 月供 / 剩余期数 / 起始月), 缺失报 INFO
+- 下次月供日计算: 起始月最后一天, 之后每月同日 (自动处理 2 月天数)
+- **≤5 天**: WARN ("月供临近, 金额 X")
+- **已过 ≤3 天未记账**: ERROR ("月供已过 X 天未还!")
+- **已过 4+ 天未记账**: ERROR ("严重逾期")
+- **当月已记账**: INFO ("已还, 下次月供...")
+
+**支持 4 个贷款字段** (zh + en): `贷款总额/Principal` / `月供/Monthly Payment` / `剩余期数/Remaining Months` / `起始月/Start Month`
+
+**配套**: `monthly_summary.py` 月末报告自动添加"💳 贷款账户进度"段 (贷款总额 / 已还 / 百分比 / 剩余期数)
+
+---
 
 ### scripts/installment_helper.py — 分期模板生成器 (#24)
 

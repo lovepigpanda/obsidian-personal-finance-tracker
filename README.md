@@ -117,6 +117,7 @@ status: ACTIVE
 | `credit_card_reminder.py` | **Agent 帮用户配每日 8:00 定时任务 (#23)** | 信用卡还款日提醒 (WARN: ≤5 天, INFO: >5 天) |
 | `installment_check.py` | **Agent 帮用户配每日 8:00 定时任务 (#24)** | 分期组完整性、字段一致性、PENDING 到期提醒 |
 | `installment_helper.py` | **用户写完第一期 expense 时 Agent 调 (#24)** | 从第一期生成 N-1 个 PENDING 期模板 |
+| `loan_payment_reminder.py` | **Agent 帮用户配每日 8:10 定时任务 (#37)** | 贷款月供提醒 (WARN: ≤5 天, ERROR: 已过未还, INFO: 已还) |
 
 ### 用法
 
@@ -146,6 +147,9 @@ python3 ~/Project/obsidian-personal-finance-tracker/scripts/installment_check.py
 python3 ~/Project/obsidian-personal-finance-tracker/scripts/installment_helper.py create \
   --first-file ~/Obsidian/finance/Transactions/expenses/<第一期文件> \
   --total 12
+
+# 贷款月供提醒 (#37) - Agent 帮用户配每日 8:10 定时任务
+python3 ~/Project/obsidian-personal-finance-tracker/scripts/loan_payment_reminder.py --vault ~/Obsidian/finance
 ```
 
 ### 通知渠道
@@ -425,6 +429,7 @@ See [en/AGENTS.md Example 5](en/AGENTS.md) and [en/Templates/transfer-template.m
 | `credit_card_reminder.py` | **Agent helps user configure daily 8:00 scheduled task (#23)** | Credit card payment reminder (WARN: ≤5 days, INFO: >5 days) |
 | `installment_check.py` | **Agent helps user configure daily 8:00 scheduled task (#24)** | Installment group integrity, field consistency, PENDING-due reminder |
 | `installment_helper.py` | **Agent calls after user writes first installment (#24)** | Generate N-1 PENDING installment templates from first |
+| `loan_payment_reminder.py` | **Agent helps user configure daily 8:10 scheduled task (#37)** | Loan payment reminder (WARN: ≤5 days, ERROR: overdue, INFO: paid) |
 
 ### Usage
 
@@ -454,6 +459,9 @@ python3 ~/Project/obsidian-personal-finance-tracker/scripts/installment_check.py
 python3 ~/Project/obsidian-personal-finance-tracker/scripts/installment_helper.py create \
   --first-file ~/Obsidian/finance/Transactions/expenses/<first_installment> \
   --total 12
+
+# Loan payment reminder (#37) - Agent helps user configure daily 8:10 scheduled task
+python3 ~/Project/obsidian-personal-finance-tracker/scripts/loan_payment_reminder.py --vault ~/Obsidian/finance
 ```
 
 ### Notification Channels
