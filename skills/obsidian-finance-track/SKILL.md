@@ -58,7 +58,7 @@ triggers:
   - balance
   - 余额
   - 账户
-version: V1.2
+version: V1.2.1
 status: ACTIVE
 tags: [finance, obsidian, accounting, agent, nlp]
 author: lovepigpanda
@@ -242,21 +242,28 @@ Dataview 仪表盘（~/Obsidian/finance/Dashboards/finance-dashboard.md）自动
 
 **触发**: 用户第一次加载本技能 (或说"装好了"/"开始用")。
 
-**不要默默开始记账**。先做 7 步配置（完整内容见 [AGENTS-PROACTIVE.md](../../zh/AGENTS-PROACTIVE.md)）:
+**不要默默开始记账**。先做 8 步配置（完整内容见 [AGENTS-PROACTIVE.md](../../zh/AGENTS-PROACTIVE.md)）:
 
 1. **确认 vault 目录** — 默认 `~/Obsidian/finance`, 确认或改
 2. **验证必需文件** — 检查 Templates / Categories / Dashboards / Accounts 都在, 缺的主动帮 cp
-3. **引导填账户列表** — 问"你有哪些账户", 帮写 `Accounts/account-list.md` (信用卡账户问账单日/还款日)
-4. **配置定时提醒** — **核心!** 主动问"要不要我帮你配以下定时任务?" (Agent 会**帮用户生成** plist/cron, 用户复制粘贴就行):
+3. **⚠️ 安装/验证 scripts/ 脚本目录** (V1.2.1 新增, **必须**):
+   - **本技能的所有定时任务都依赖仓库根的 `scripts/` 目录**（`credit_card_reminder.py` / `installment_check.py` / `loan_payment_reminder.py` / `daily_integrity_check.py` / `weekly_summary.py` / `monthly_summary.py` 等 9 个脚本）。
+   - `aweskill install` **只同步** `skills/<skill-name>/` 目录到中央 store, **不同步** 仓库根的 `scripts/` → 如果用户用 aweskill 装本技能, 定时任务跑时会**找不到脚本**。
+   - **Agent 主动帮用户** 执行以下任一方式:
+     - **方式 A (推荐)**: `git clone https://github.com/lovepigpanda/obsidian-personal-finance-tracker.git ~/Project/obsidian-personal-finance-tracker` (一次性, 后续 `git pull` 同步)
+     - **方式 B**: `aweskill install --skill obsidian-finance-track` 后, Agent 主动 `cp <aweskill-store>/skills/obsidian-finance-track/scripts/* ~/Project/obsidian-personal-finance-tracker/scripts/` (首次手动, 后续 aweskill update 不会同步 scripts/)
+   - **验证**: Agent 跑 `ls ~/Project/obsidian-personal-finance-tracker/scripts/loan_payment_reminder.py`, 确认 9 个脚本都在, 缺哪个 cp 哪个
+4. **引导填账户列表** — 问"你有哪些账户", 帮写 `Accounts/account-list.md` (信用卡账户问账单日/还款日, 贷款账户问贷款总额/月供/剩余期数/起始月)
+5. **配置定时提醒** — **核心!** 主动问"要不要我帮你配以下定时任务?" (Agent 会**帮用户生成** plist/cron, 用户复制粘贴就行):
    - **每日 18:00** 跑 daily_integrity_check.py (包括 #33 记账频率、#34 账户遗忘检测)
    - **每周日 20:00** 跑 weekly_summary.py (#35 周末复盘)
    - **每月最后一日 21:00** 跑 monthly_summary.py (#36 月末自检)
    - **每日 8:00** 跑 credit_card_reminder.py (信用卡临近账单日/还款日时提醒, #23)
    - **每日 8:05** 跑 installment_check.py (分期 PENDING 到期检查, #24)
    - **每日 8:10** 跑 loan_payment_reminder.py (贷款月供提醒, #37)
-5. **配置通知偏好** — 主动问"校验失败时我用我自己的通道 (飞书/微信) 发给你, 还是写 alerts.md?"
-6. **保存配置 + 写哨兵** — 写到 `Accounts/agent-config.md` (用户可见、可改), **必须** 包含 `onboarded: true` 字段。模板见下方。
-7. **试一笔** — 验证整个流程通
+6. **配置通知偏好** — 主动问"校验失败时我用我自己的通道 (飞书/微信) 发给你, 还是写 alerts.md?"
+7. **保存配置 + 写哨兵** — 写到 `Accounts/agent-config.md` (用户可见、可改), **必须** 包含 `onboarded: true` 字段。模板见下方。
+8. **试一笔** — 验证整个流程通
 
 **`Accounts/agent-config.md` 模板** (Agent 主动生成, 用户确认):
 

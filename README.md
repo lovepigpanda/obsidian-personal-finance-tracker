@@ -4,6 +4,48 @@
 
 ---
 
+## 📦 安装 (V1.2.1 必读)
+
+**所有定时任务都依赖仓库根的 `scripts/` 目录**（9 个 Python 脚本，零依赖）。
+
+### 方式 A：完整 clone (推荐)
+
+```bash
+git clone https://github.com/lovepigpanda/obsidian-personal-finance-tracker.git ~/Project/obsidian-personal-finance-tracker
+# 后续更新
+cd ~/Project/obsidian-personal-finance-tracker && git pull
+```
+
+### 方式 B：用 aweskill 装技能 + 手动 cp scripts/
+
+```bash
+# 1. 装技能 (只同步 skills/ 目录)
+aweskill install --skill obsidian-finance-track
+
+# 2. 手动 cp scripts/ 到项目目录 (重要！aweskill 不同步仓库根 scripts/)
+mkdir -p ~/Project/obsidian-personal-finance-tracker
+cp ~/.aweskill/skills/obsidian-finance-track/scripts/*.py ~/Project/obsidian-personal-finance-tracker/scripts/
+
+# 3. 后续更新
+aweskill update obsidian-finance-track
+# 注意: aweskill update 只更新 skills/, scripts/ 需要从 GitHub 重新 clone 或手动 cp
+cd ~/Project/obsidian-personal-finance-tracker && git pull
+```
+
+**验证**：
+```bash
+ls ~/Project/obsidian-personal-finance-tracker/scripts/loan_payment_reminder.py
+# 期望: 文件存在, 大小 ~9KB
+```
+
+### ⚠️ 为什么 scripts/ 不能靠 aweskill 同步？
+
+`aweskill install/update` 设计上只同步 `skills/<skill-name>/` 子目录，**不同步**仓库根的 `scripts/`。这是 aweskill 的设计，不是 bug。
+
+如果只用 aweskill 装技能、不 clone 仓库，**所有定时任务都会失败**（找不到 `loan_payment_reminder.py` 等脚本）。
+
+---
+
 ## ⚠️ 数据存储架构 — 重要
 
 **技能代码与账本数据完全分离：**

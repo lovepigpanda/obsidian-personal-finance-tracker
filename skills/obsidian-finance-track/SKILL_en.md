@@ -63,7 +63,7 @@ triggers:
   - balance
   - 余额
   - 账户
-version: V1.2
+version: V1.2.1
 status: ACTIVE
 tags: [finance, obsidian, accounting, agent, nlp]
 author: lovepigpanda
@@ -250,19 +250,28 @@ Load this skill when ANY of the following conditions are met:
 
 **Trigger**: User loads this skill for the first time (or says "installed" / "let's start").
 
-**Do NOT silently start logging**. First complete the 7-step configuration (full content in [AGENTS-PROACTIVE.md](../../en/AGENTS-PROACTIVE.md)):
+**Do NOT silently start logging**. First complete the 8-step configuration (full content in [AGENTS-PROACTIVE.md](../../en/AGENTS-PROACTIVE.md)):
 
 1. **Confirm vault directory** — default `~/Obsidian/finance`, confirm or change
 2. **Verify required files** — check Templates / Categories / Dashboards / Accounts exist, proactively cp missing ones
-3. **Guide filling account list** — ask "what accounts do you have", help write `Accounts/account-list.md` (ask credit card accounts for statement day / payment due day)
-4. **Configure scheduled reminders** — **Core!** Proactively ask "shall I help you set up these scheduled tasks?" (Agent will **help generate** plist/cron, user just copies & pastes):
+3. **⚠️ Install/verify scripts/ directory** (V1.2.1 new, **MUST**):
+   - **All scheduled tasks of this skill depend on the `scripts/` directory at the repo root** (`credit_card_reminder.py` / `installment_check.py` / `loan_payment_reminder.py` / `daily_integrity_check.py` / `weekly_summary.py` / `monthly_summary.py` and 3 more = 9 scripts total).
+   - `aweskill install` only syncs `skills/<skill-name>/` to the central store, **NOT** the repo root `scripts/` → if user installs via aweskill, scheduled tasks will fail to find scripts at runtime.
+   - **Agent proactively helps user** execute one of:
+     - **Method A (recommended)**: `git clone https://github.com/lovepigpanda/obsidian-personal-finance-tracker.git ~/Project/obsidian-personal-finance-tracker` (one-time, then `git pull` to sync)
+     - **Method B**: After `aweskill install --skill obsidian-finance-track`, Agent actively `cp <aweskill-store>/skills/obsidian-finance-track/scripts/* ~/Project/obsidian-personal-finance-tracker/scripts/` (first-time manual, `aweskill update` will not sync scripts/ later)
+   - **Verify**: Agent runs `ls ~/Project/obsidian-personal-finance-tracker/scripts/loan_payment_reminder.py`, confirms all 9 scripts are there, cp any missing ones
+4. **Guide filling account list** — ask "what accounts do you have", help write `Accounts/account-list.md` (ask credit card accounts for statement day / payment due day; ask loan accounts for Principal / Monthly Payment / Remaining Months / Start Month)
+5. **Configure scheduled reminders** — **Core!** Proactively ask "shall I help you set up these scheduled tasks?" (Agent will **help generate** plist/cron, user just copies & pastes):
    - **Daily 18:00** run daily_integrity_check.py (includes #33 bookkeeping frequency, #34 account inactivity detection)
    - **Sunday 20:00** run weekly_summary.py (#35 weekend recap)
    - **Last day of month 21:00** run monthly_summary.py (#36 month-end self-check)
    - **Daily 8:00** run credit_card_reminder.py (remind when card statement/due day approaching, #23)
-5. **Configure notification preferences** — ask "shall I use my own channel (Feishu/WeChat) to notify you, or write to alerts.md?"
-6. **Save config + write sentinel** — write to `Accounts/agent-config.md` (user-visible, user-editable), **MUST** include `onboarded: true` field. See template below.
-7. **Test one transaction** — verify entire flow works
+   - **Daily 8:05** run installment_check.py (installment PENDING due check, #24)
+   - **Daily 8:10** run loan_payment_reminder.py (loan payment reminder, #37)
+6. **Configure notification preferences** — ask "shall I use my own channel (Feishu/WeChat) to notify you, or write to alerts.md?"
+7. **Save config + write sentinel** — write to `Accounts/agent-config.md` (user-visible, user-editable), **MUST** include `onboarded: true` field. See template below.
+8. **Test one transaction** — verify entire flow works
 
 **`Accounts/agent-config.md` template** (Agent auto-generates, user confirms):
 
