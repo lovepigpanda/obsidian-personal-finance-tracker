@@ -147,6 +147,21 @@ created: 2026-06-01
 | 还信用卡 / 还卡 | transfer（出账→信用卡） |
 | from X to Y / X 转 Y | transfer |
 
+### 默认账户解析（V1.3.3+ #38）
+
+如果用户在自然语言里**没指定账户**（例: "午餐沙县花了45元"），Agent 应调用 `scripts/transaction_create.py`，由其按以下优先级自动选账户：
+
+1. **用户显式指定**（"用招行"）→ 直接用
+2. **note 隐式提了账户名**（"用支付宝买了..."）→ 用 note 里的账户
+3. **config/default_accounts.yaml 规则匹配**（"地铁|公交" → 交通卡，"还款" → CMB 储蓄卡，"Food/Shopping/..." → 信用卡）
+4. **learning.json 历史偏好**（"沙县" → 上次用的账户）
+5. **fallback**（expense=Alipay, income=CMB, transfer=ask 必须显式问）
+
+**学习机制** (ask_on_2nd)：
+- 第一次用默认账户 → 静默记录到 `~/.obsidian-finance/learning.json`
+- 第二次同 keyword 但选了不同账户 → Agent 用 `clarify` 工具问用户"改默认吗?"
+- 用户确认后 → 更新 learning
+
 ---
 
 ## 使用示例

@@ -411,6 +411,44 @@ scheduled_tasks:
 | Cash | 现金 | Cash |
 | USD Account | 美元账户 | USD Account |
 
+### 步骤 4.5：默认账户解析（V1.3.3+ #38）
+
+如果用户在自然语言里**没指定账户**（例: "午餐沙县花了45元"），Agent 应调用 `scripts/transaction_create.py`，由其按以下优先级自动选账户：
+
+1. **用户显式指定**（"用招行"）→ 直接用
+2. **note 隐式提了账户名**（"用支付宝买了..."）→ 用 note 里的账户
+3. **config/default_accounts.yaml 规则匹配**（"地铁|公交" → 交通卡，"还款" → CMB 储蓄卡，"Food/Shopping/..." → 信用卡）
+4. **learning.json 历史偏好**（"沙县" → 上次用的账户）
+5. **fallback**（expense=Alipay, income=CMB, transfer=ask 必须显式问）
+
+**学习机制** (V1.3.3+ ask_on_2nd)：
+- 第一次用默认账户 → 静默记录到 `~/.obsidian-finance/learning.json`
+- 第二次同 keyword 但选了不同账户 → Agent 用 `clarify` 工具问用户"改默认吗?"
+- 用户确认后 → 更新 learning
+
+**Agent 调用**:
+```bash
+python3 scripts/transaction_create.py \
+  --vault ~/Obsidian/finance \
+  --type expense \
+  --date 2026-06-03 \
+  --amount 45 \
+  --category Food \
+  --note "午餐沙县"
+```
+返回 JSON:
+```json
+{
+  "ok": true,
+  "file_path": "Transactions/expenses/2026-06-03-午餐沙县-45-CNY-ACTIVE.md",
+  "account": "CMB Credit",
+  "source": "config",
+  "ask_message": null
+}
+```
+
+如果 `ask_message` 非空, Agent **必须**用 `clarify` 工具问用户, **不要**直接创建文件。
+
 ### 步骤 5：生成文件名
 
 **支出 / 收入：**
@@ -680,6 +718,40 @@ python3 ~/Project/obsidian-personal-finance-tracker/scripts/credit_card_reminder
 - 写到 `alerts.md`
 
 **前置**: 信用卡账户必须在 `account-list.md` 写 `statement_day` + `payment_due_day` 字段, 否则报 INFO 提示补字段 (软告警, 不阻塞)。
+
+### scripts/transaction_create.py — Agent 记账入口 (#38)
+
+**何时用**: Agent 解析完用户自然语言、准备创建交易 .md 文件时。
+
+```bash
+python3 ~/Project/obsidian-personal-finance-tracker/scripts/transaction_create.py \
+  --vault ~/Obsidian/finance \
+  --type expense \
+  --date 2026-06-03 \
+  --amount 45 \
+  --category Food \
+  --note "午餐沙县"
+```
+
+返回 JSON:
+```json
+{
+  "ok": true,
+  "file_path": "Transactions/expenses/2026-06-03-午餐沙县-45-CNY-ACTIVE.md",
+  "account": "CMB Credit",
+  "source": "config",
+  "ask_message": null
+}
+```
+
+**核心功能 (V1.3.3+)**:
+- 用户没指定账户时, 自动按 5 层优先级选默认账户 (user > note > config > learning > fallback)
+- 学习机制 (ask_on_2nd): 第一次静默记录, 第二次冲突时 `ask_message` 返回询问文本, Agent 必须用 `clarify` 工具问用户
+- transfer 类型必须显式 `--account` + `--to-account`, 不走默认
+
+**前置**:
+- `config/default_accounts.yaml` 存在 (仓库模板跟 vault 同步)
+- vault 端 `Accounts/account-list.md` 有账户定义
 
 ### scripts/installment_check.py — 分期完整性检查 (#24)
 

@@ -146,6 +146,21 @@ created: 2026-06-01
 | pay credit card / repay card | transfer (out → credit card) |
 | from X to Y / X to Y | transfer |
 
+### Default Account Resolution (V1.3.3+ #38)
+
+If the user **didn't specify an account** in the natural language (e.g. "had lunch at Shaxian for 45 CNY"), the Agent should call `scripts/transaction_create.py`, which auto-selects by priority:
+
+1. **User explicit** ("use CMB") → use directly
+2. **note implicit** ("bought with Alipay...") → extract from note
+3. **config/default_accounts.yaml rules** ("subway|bus" → 交通卡, "repay" → CMB savings, "Food/Shopping/..." → credit card)
+4. **learning.json history** ("Shaxian" → previously used account)
+5. **fallback** (expense=Alipay, income=CMB, transfer=ask must be explicit)
+
+**Learning mechanism** (ask_on_2nd):
+- 1st time using default → silently record to `~/.obsidian-finance/learning.json`
+- 2nd time same keyword but different account → Agent must use `clarify` tool to ask "change default?"
+- User confirms → update learning
+
 ---
 
 ## Usage Examples

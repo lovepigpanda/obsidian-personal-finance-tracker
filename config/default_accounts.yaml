@@ -1,0 +1,120 @@
+---
+# Default Account Mapping (V1.0)
+# 用于: Agent 记账时, 用户没指定账户, 自动按"消费类别 + 关键词"选默认账户
+# 工作流: config 优先 → learning 兜底 → fallback 兜底
+#
+# 语法:
+#   defaults:           (按顺序匹配, 第一个匹配就用)
+#     - match: {category: <正则>, keyword: <正则>}
+#       account: <账户名>     # 必须存在于 account-list.md
+#       type: <账户类型>      # 可选, 校验 (bank/e-wallet/credit-card/loan)
+#   fallback:           (defaults 都没匹配时用)
+#     expense: <账户名>
+#     income: <账户名>
+#     transfer: ask     # 转账必须显式问 from/to
+#   learning:           # (V1.1+) 用户历史偏好, 脚本自动写入 ~/.obsidian-finance/learning.json
+#     enabled: true
+#     conflict_policy: ask_on_2nd   # 第一次静默, 第二次跟第一次不同就问
+#
+# 匹配算法:
+#   1. 遍历 defaults, 对每条规则: re.search(match.keyword, transaction.note) AND re.search(match.category, transaction.category) → 匹配
+#   2. 第一个匹配规则生效, 返回 account
+#   3. 无匹配 → 查 learning.json: 找 note 里含相同关键词的历史记录
+#   4. 仍无 → 用 fallback
+#   5. 用户显式说 "用 XX 支付/付款" → 跳过默认, 直接用 XX
+
+version: V1.0
+type: agent-config
+tags: [config, default-account, agent]
+
+fallback:
+  expense: Alipay
+  income: CMB
+  transfer: ask        # 转账 from/to 必须显式问, 不自动选
+
+learning:
+  enabled: true
+  conflict_policy: ask_on_2nd   # 1st 静默记, 2nd 跟 1st 不同就问用户
+  store_path: ~/.obsidian-finance/learning.json
+
+defaults:
+  # === 还款专用 (最优先, 防止误判) ===
+  - match:
+      category: ".*"
+      keyword: "还款|还卡|还信用卡|还花呗|还白条|还微粒贷|repay|repayment"
+    account: CMB   # 储蓄卡扣款
+    note: 还款用储蓄卡 (避免信用卡还信用卡产生手续费)
+
+  # === 交通类 ===
+  - match:
+      category: Transport
+      keyword: "地铁|公交|公交卡|地铁卡|subway|bus|metro"
+    account: 交通卡
+    type: e-wallet
+  - match:
+      category: Transport
+      keyword: "打车|滴滴|出租|网约车|taxi|ride"
+    account: Alipay
+    type: e-wallet
+  - match:
+      category: Transport
+      keyword: "加油|油费|中石化|中石油|gas"
+    account: CMB Credit
+    type: credit-card
+  - match:
+      category: Transport
+      keyword: "高铁|火车|12306|动车"
+    account: CMB
+    type: bank
+  - match:
+      category: Transport
+      keyword: ".*"   # 交通类兜底
+    account: Alipay
+
+  # === 消费 (Food / Shopping / Entertainment / Health) ===
+  - match:
+      category: "Food|Shopping|Entertainment|Health"
+      keyword: ".*"
+    account: CMB Credit
+    type: credit-card
+    note: 消费类默认用信用卡 (积分 + 免息期)
+
+  # === 居家 (Housing / Communication) ===
+  - match:
+      category: "Housing|Communication"
+      keyword: ".*"
+    account: CMB
+    type: bank
+    note: 居家类用储蓄卡 (固定支出, 走银行卡自动扣)
+
+  # === 收入 (Salary / Bonus / Freelance) ===
+  - match:
+      category: "Salary|Bonus|Freelance"
+      keyword: ".*"
+    account: CMB
+    type: bank
+    note: 工资默认入账到 CMB
+
+  # === 投资 / 理财 (Investment) ===
+  - match:
+      category: Investment
+      keyword: ".*"
+    account: CMB
+    type: bank
+    note: 投资类用储蓄卡转出
+
+  # === 礼物 / 人情 (Gift) ===
+  - match:
+      category: Gift
+      keyword: "红包|微信红包|发红包"
+    account: WeChat Pay
+    type: e-wallet
+  - match:
+      category: Gift
+      keyword: ".*"
+    account: Alipay
+    type: e-wallet
+
+  # === 转账 (Transfer) ===
+  # 转账不在 defaults 里, 由 transfer_keywords 触发, 走 from/to 解析
+  # fallback.transfer=ask 保证不会误判

@@ -212,7 +212,7 @@ python3 ~/Project/obsidian-personal-finance-tracker/scripts/loan_payment_reminde
 本系统主要面向 **AI Agent**（Claude / Hermes / OpenClaw / Claude Code / Cursor 等），用户用自然语言描述交易，AI Agent 自动：
 
 1. 解析意图（支出/收入/**转账**）、日期、金额、币种
-2. 匹配账户和分类（根据 `QUICK-REFERENCE.md` 映射表）
+2. 匹配账户和分类（根据 `QUICK-REFERENCE.md` 映射表，**未指定账户时走 V1.3.3+ 默认账户解析**）
 3. 在 `~/Obsidian/finance/Transactions/` 下创建对应 `.md` 文件
 4. **自动跑校验脚本**（步骤 7.5）保证数据一致性
 
@@ -223,6 +223,18 @@ AI Agent → 创建文件 + 跑校验 ✓
 
 用户 → `"从支付宝转 5000 到招行，还信用卡"`
 AI Agent → 创建 2 个 transfer 文件（共 pair_id）+ 跑校验 2 次 ✓
+
+### V1.3.3+ 默认账户解析（#38）
+
+Agent 调用 `scripts/transaction_create.py` 处理"没指定账户"的输入：
+
+```bash
+python3 scripts/transaction_create.py --vault ~/Obsidian/finance \
+  --type expense --date 2026-06-03 --amount 45 \
+  --category Food --note "午餐沙县"
+```
+
+5 层优先级自动选账户：**用户显式 > note 隐式 > config 规则 > learning 历史 > fallback**。学习机制 (ask_on_2nd) 第一次静默记录，第二次冲突返回 `ask_message`，Agent 必须用 `clarify` 工具问用户。
 
 详见：[zh/AGENTS.md](zh/AGENTS.md) · [zh/QUICK-REFERENCE.md](zh/QUICK-REFERENCE.md) · [en/AGENTS.md](en/AGENTS.md)
 

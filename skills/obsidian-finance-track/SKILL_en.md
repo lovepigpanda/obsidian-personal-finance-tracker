@@ -420,6 +420,44 @@ Match account name based on payment tool:
 | Cash | 现金 | Cash |
 | USD Account | 美元账户 | USD Account |
 
+### Step 4.5: Default Account Resolution (V1.3.3+ #38)
+
+If the user **didn't specify an account** in the natural language (e.g. "had lunch at Shaxian for 45 CNY"), the Agent should call `scripts/transaction_create.py`, which auto-selects an account by priority:
+
+1. **User explicit** ("use CMB") → use directly
+2. **note implicit** ("bought with Alipay...") → extract from note
+3. **config/default_accounts.yaml rules** ("subway|bus" → 交通卡, "repay" → CMB savings, "Food/Shopping/..." → credit card)
+4. **learning.json history** ("Shaxian" → previously used account)
+5. **fallback** (expense=Alipay, income=CMB, transfer=ask must be explicit)
+
+**Learning mechanism** (V1.3.3+ ask_on_2nd):
+- 1st time using default → silently record to `~/.obsidian-finance/learning.json`
+- 2nd time same keyword but different account → Agent must use `clarify` tool to ask "change default?"
+- User confirms → update learning
+
+**Agent invocation**:
+```bash
+python3 scripts/transaction_create.py \
+  --vault ~/Obsidian/finance \
+  --type expense \
+  --date 2026-06-03 \
+  --amount 45 \
+  --category Food \
+  --note "lunch at Shaxian"
+```
+Returns JSON:
+```json
+{
+  "ok": true,
+  "file_path": "Transactions/expenses/2026-06-03-lunch-at-shaxian-45-CNY-ACTIVE.md",
+  "account": "CMB Credit",
+  "source": "config",
+  "ask_message": null
+}
+```
+
+If `ask_message` is non-null, the Agent **MUST** use the `clarify` tool to ask the user, **do NOT** create the file directly.
+
 ### Step 5: Generate Filename
 
 **Expense / Income:**
@@ -682,9 +720,43 @@ Validates:
 - Due date ≤ 5 days → WARN, already past → ERROR
 - Writes to `alerts.md`
 
-**Prerequisite**: credit card accounts must have `statement_day` + `payment_due_day` fields in `account-list.md`, otherwise INFO prompts user to fill (soft alert, non-blocking).
+**Prerequisite**: Credit card accounts must have `statement_day` + `payment_due_day` fields in `account-list.md`, otherwise INFO is reported (soft alert, non-blocking).
 
-### scripts/installment_check.py — Installment Integrity Check (#24)
+### scripts/transaction_create.py — Agent Transaction Entry (#38)
+
+**When to use**: After Agent parses user natural language and is ready to create a transaction .md file.
+
+```bash
+python3 ~/Project/obsidian-personal-finance-tracker/scripts/transaction_create.py \
+  --vault ~/Obsidian/finance \
+  --type expense \
+  --date 2026-06-03 \
+  --amount 45 \
+  --category Food \
+  --note "lunch at Shaxian"
+```
+
+Returns JSON:
+```json
+{
+  "ok": true,
+  "file_path": "Transactions/expenses/2026-06-03-lunch-at-shaxian-45-CNY-ACTIVE.md",
+  "account": "CMB Credit",
+  "source": "config",
+  "ask_message": null
+}
+```
+
+**Core features (V1.3.3+)**:
+- When user did not specify an account, auto-select by 5-level priority: user > note > config > learning > fallback
+- Learning mechanism (ask_on_2nd): 1st time silently records, 2nd time conflict returns `ask_message` text, Agent MUST use `clarify` tool to ask user
+- transfer type MUST provide `--account` + `--to-account` explicitly, no default applied
+
+**Prerequisites**:
+- `config/default_accounts.yaml` exists (synced between repo template and vault)
+- vault `Accounts/account-list.md` has account definitions
+
+### scripts/installment_check.py — Installment Completeness Check (#24)
 
 **When**: Agent helps user configure daily 8:05 scheduled task.
 

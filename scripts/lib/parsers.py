@@ -49,6 +49,38 @@ def parse_frontmatter(filepath: str) -> Tuple[Dict, str]:
     return (fm, body)
 
 
+def parse_config_yaml(filepath: str) -> Dict[str, Any]:
+    """
+    解析 config YAML 文件 (default_accounts.yaml 等)。
+
+    支持:
+    - 纯 YAML (无 frontmatter)
+    - frontmatter `--- ... ---` 包裹的 YAML (跟 .md 一致)
+
+    Returns:
+        dict 解析结果
+    """
+    try:
+        with open(filepath, "r", encoding="utf-8") as f:
+            content = f.read()
+    except (OSError, UnicodeDecodeError):
+        return {}
+
+    lines = content.split("\n")
+    if not lines:
+        return {}
+
+    # 检测 frontmatter
+    start = 0
+    if lines[0].strip() == FRONTMATTER_DELIM:
+        for i in range(1, len(lines)):
+            if lines[i].strip() == FRONTMATTER_DELIM:
+                start = i + 1
+                break
+
+    return _parse_simple_yaml(lines[start:])
+
+
 def _parse_simple_yaml(lines: List[str]) -> Dict:
     """
     极简 YAML 解析器 — 只支持本项目用到的语法：
@@ -56,18 +88,236 @@ def _parse_simple_yaml(lines: List[str]) -> Dict:
     - key: [a, b, c]   (inline list)
     - key: "quoted value"
     - key: number
+    - 嵌套 dict: 通过缩进 (2 空格) 表达, 缩进层级形成嵌套
+    - list of dict: 顶层 key 后面跟 '-' 行, 同一缩进
+
+    V1.0 (V1.3.3 扩展): 支持嵌套 — default_accounts.yaml 用到
     """
     result = {}
-    for line in lines:
-        if not line.strip() or line.strip().startswith("#"):
+    _parse_yaml_block(lines, 0, 0, result)
+    return result
+
+
+def _parse_yaml_block(lines: List[str], start: int, base_indent: int, out: Dict[str, Any]) -> int:
+    """
+    递归解析 YAML 块。
+    返回: 处理到的行数 (从 start 起)
+    """
+    i = start
+    while i < len(lines):
+        line = lines[i]
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            i += 1
             continue
-        m = re.match(r"^([a-zA-Z_][\w-]*)\s*:\s*(.*)$", line)
+
+        # 计算缩进 (前导空格数)
+        indent = len(line) - len(line.lstrip())
+
+        # 缩进回到 base 或更小 → 本块结束
+        if indent < base_indent:
+            return i - start
+
+        # 如果是 list item (以 '-' 开头)
+        if stripped.startswith("- "):
+            # list item 必须有父 key, 父 key 在外层
+            # 当前块是 list, 我们期望父 key 已经创建
+            return i - start
+
+        # 解析 key: value (允许前导空格)
+        m = re.match(r"^\s*([a-zA-Z_][\w-]*)\s*:\s*(.*)$", line)
         if not m:
+            i += 1
             continue
+
         key = m.group(1).strip()
         value = m.group(2).strip()
-        result[key] = _coerce_value(value)
-    return result
+        i += 1
+
+        if not value:
+            # 可能是嵌套 dict 或 list
+            # 找下一行 (跳过空行/注释) 的缩进
+            j = i
+            while j < len(lines) and (not lines[j].strip() or lines[j].strip().startswith("#")):
+                j += 1
+            if j < len(lines):
+                next_line = lines[j]
+                next_stripped = next_line.strip()
+                next_indent = len(next_line) - len(next_line.lstrip())
+                if next_indent > indent and next_stripped:
+                    if next_stripped.startswith("- "):
+                        # list of dict
+                        lst = []
+                        consumed = _parse_yaml_list(lines, j, next_indent, lst)
+                        i = j + consumed
+                        out[key] = lst
+                    else:
+                        # nested dict
+                        nested: Dict[str, Any] = {}
+                        consumed = _parse_yaml_block(lines, j, next_indent, nested)
+                        i = j + consumed
+                        out[key] = nested
+                else:
+                    out[key] = ""
+            else:
+                out[key] = ""
+        else:
+            out[key] = _coerce_value(value)
+
+
+    return i - start
+
+
+def _parse_yaml_list(lines: List[str], start: int, base_indent: int, out: List[Any]) -> int:
+    """
+    解析 list of dict / list of scalar。
+    每行以 '- ' 开头, 后面跟 scalar 或 key: value 对 (一个或多个, 缩进比 '-' 大 2)。
+    """
+    i = start
+    while i < len(lines):
+        line = lines[i]
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            i += 1
+            continue
+
+        indent = len(line) - len(line.lstrip())
+        # list item 必须 indent >= base_indent (跟 - 同行/更深)
+        if indent < base_indent:
+            return i - start
+        # 离开 list 的条件: indent 回到 base 且不是 - 开头 (说明是新 block)
+        if indent == base_indent and not stripped.startswith("- "):
+            return i - start
+        # indent == base 且是 - 开头: 继续, 是新 list item
+        if indent < base_indent:
+            return i - start
+        if not stripped.startswith("- "):
+            # inline 后续 (例如同一 item 的 account:), 跳过由具体处理逻辑
+            # 但 list 主体认为"不是 list item", 应该 return 让 caller 知道 list 结束
+            # 然而实际: 这种情况不应该出现在 list 主体 while 顶 (因为 item 处理完会调 inline 处理 inline 行)
+            # 保留 return 防止无限循环
+            return i - start
+
+        # 解析 item 内容
+        item_content = stripped[2:].strip()  # 去掉 "- "
+
+        if not item_content:
+            # '-' 后面空, 说明是 dict (下一行是 key: value, 缩进比当前行大 2)
+            j = i + 1
+            while j < len(lines) and (not lines[j].strip() or lines[j].strip().startswith("#")):
+                j += 1
+            if j < len(lines):
+                next_line = lines[j]
+                next_indent = len(next_line) - len(next_line.lstrip())
+                # 期望 next_indent >= base_indent + 2
+                if next_indent >= base_indent + 2:
+                    item = {}
+                    consumed = _parse_yaml_block(lines, j, next_indent, item)
+                    i = j + consumed
+                    out.append(item)
+                else:
+                    out.append({})
+                    i = j
+            else:
+                out.append({})
+        elif ":" in item_content:
+            # '- key: value' 形式, 一行 dict
+            m = re.match(r"^\s*([a-zA-Z_][\w-]*)\s*:\s*(.*)$", item_content)
+            if m:
+                k = m.group(1).strip()
+                v = m.group(2).strip()
+                if not v:
+                    # '- key:' 后面空, 期待嵌套 dict
+                    # 整段处理: nested (缩进 > base+2) + inline 后续 (缩进 = base+2)
+                    item: Dict[str, Any] = {k: {}}
+                    i = i + 1  # 跳过 "- <k>:" 这一行
+                    nested_done = False
+                    while i < len(lines):
+                        line = lines[i]
+                        stripped = line.strip()
+                        if not stripped or stripped.startswith("#"):
+                            i += 1
+                            continue
+                        next_indent = len(line) - len(line.lstrip())
+                        if next_indent < base_indent + 2:
+                            # 回到 base 以下, 退出
+                            break
+                        if next_indent == base_indent + 2 and not stripped.startswith("- "):
+                            # inline 后续 (跟 <k> 同行)
+                            m2 = re.match(r"^\s*([a-zA-Z_][\w-]*)\s*:\s*(.*)$", line)
+                            if m2:
+                                k2 = m2.group(1).strip()
+                                v2 = m2.group(2).strip()
+                                if v2:
+                                    item[k2] = _coerce_value(v2)
+                                else:
+                                    item[k2] = "" if not nested_done else ""
+                            i += 1
+                        elif next_indent > base_indent + 2 and not stripped.startswith("- "):
+                            # nested 块
+                            if not nested_done:
+                                consumed = _parse_yaml_block(lines, i, next_indent, item[k])
+                                i += consumed
+                                nested_done = True
+                            else:
+                                # nested 已 done, 还在更深? 错误, 跳过
+                                i += 1
+                        elif next_indent == base_indent and stripped.startswith("- "):
+                            # 新 list item, 退出
+                            break
+                        else:
+                            i += 1
+                    out.append(item)
+                else:
+                    item = {k: _coerce_value(v)}
+                    # 后面可能还有更多 key: value (缩进比当前行大 2, 不以 - 开头)
+                    i += 1
+                    while i < len(lines):
+                        next_line = lines[i]
+                        next_stripped = next_line.strip()
+                        if not next_stripped or next_stripped.startswith("#"):
+                            i += 1
+                            continue
+                        next_indent = len(next_line) - len(next_line.lstrip())
+                        # break 条件: indent 回到 base (或更小) 且不是 list item
+                        if next_indent <= base_indent and not next_stripped.startswith("- "):
+                            break
+                        if next_indent <= base_indent and next_stripped.startswith("- "):
+                            # 新 list item, 退出 inline 循环, 让 list 主体接住
+                            break
+                        m2 = re.match(r"^\s*([a-zA-Z_][\w-]*)\s*:\s*(.*)$", next_line)
+                        if m2:
+                            k2 = m2.group(1).strip()
+                            v2 = m2.group(2).strip()
+                            if not v2:
+                                # 嵌套
+                                if i + 1 < len(lines):
+                                    nn = lines[i + 1]
+                                    nn_indent = len(nn) - len(nn.lstrip())
+                                    if nn_indent > next_indent and nn.strip():
+                                        if nn.strip().startswith("- "):
+                                            lst = []
+                                            consumed = _parse_yaml_list(lines, i + 1, nn_indent, lst)
+                                            item[k2] = lst
+                                            i += 1 + consumed
+                                            continue
+                                        else:
+                                            nested = {}
+                                            consumed = _parse_yaml_block(lines, i + 1, nn_indent, nested)
+                                            item[k2] = nested
+                                            i += 1 + consumed
+                                            continue
+                                item[k2] = ""
+                            else:
+                                item[k2] = _coerce_value(v2)
+                        i += 1
+                    out.append(item)
+        else:
+            # '- scalar'
+            out.append(_coerce_value(item_content))
+            i += 1
+
+    return i - start
 
 
 def _coerce_value(raw: str):
@@ -75,35 +325,42 @@ def _coerce_value(raw: str):
     if not raw:
         return ""
 
+    # 去掉尾部注释 (# 后到行尾, 但不在引号内)
+    # 简单处理: 找 " #" 或 "\t#" 模式 (前面有空格避免吃掉 # 字符)
+    # 注: 不完美, 但够用
+    cleaned = re.sub(r"\s+#.*$", "", raw).strip()
+    if not cleaned:
+        return ""
+
     # Inline list: [a, b, c]
-    if raw.startswith("[") and raw.endswith("]"):
-        inner = raw[1:-1].strip()
+    if cleaned.startswith("[") and cleaned.endswith("]"):
+        inner = cleaned[1:-1].strip()
         if not inner:
             return []
         return [_coerce_value(x.strip()) for x in inner.split(",")]
 
     # Quoted string
-    if (raw.startswith('"') and raw.endswith('"')) or (
-        raw.startswith("'") and raw.endswith("'")
+    if (cleaned.startswith('"') and cleaned.endswith('"')) or (
+        cleaned.startswith("'") and cleaned.endswith("'")
     ):
-        return raw[1:-1]
+        return cleaned[1:-1]
 
     # Boolean
-    if raw.lower() == "true":
+    if cleaned.lower() == "true":
         return True
-    if raw.lower() == "false":
+    if cleaned.lower() == "false":
         return False
 
     # Number
     try:
-        if "." in raw:
-            return float(raw)
-        return int(raw)
+        if "." in cleaned:
+            return float(cleaned)
+        return int(cleaned)
     except ValueError:
         pass
 
     # Plain string
-    return raw
+    return cleaned
 
 
 def find_accounts_file(vault_root: str) -> Optional[str]:
