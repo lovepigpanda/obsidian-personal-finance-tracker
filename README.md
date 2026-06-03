@@ -6,7 +6,7 @@
 
 ## 📦 安装 (V1.2.1 必读)
 
-**所有定时任务都依赖仓库根的 `scripts/` 目录**（9 个 Python 脚本，零依赖）。
+**所有定时任务都依赖仓库根的 `scripts/` 目录**（10 个 Python 脚本，零依赖）。
 
 ### 方式 A：完整 clone (推荐)
 
@@ -160,6 +160,7 @@ status: ACTIVE
 | `installment_check.py` | **Agent 帮用户配每日 8:00 定时任务 (#24)** | 分期组完整性、字段一致性、PENDING 到期提醒 |
 | `installment_helper.py` | **用户写完第一期 expense 时 Agent 调 (#24)** | 从第一期生成 N-1 个 PENDING 期模板 |
 | `loan_payment_reminder.py` | **Agent 帮用户配每日 8:10 定时任务 (#37)** | 贷款月供提醒 (WARN: ≤5 天, ERROR: 已过未还, INFO: 已还) |
+| `transaction_create.py` | **Agent 解析用户输入后立即调 (#38)** | 写 expense/income/transfer 文件; 5 层解析默认账户 (user > note > config > learning > fallback); transfer 必写 out+in 共用 pair_id; 同名文件 soft alert |
 
 ### 用法
 
@@ -254,14 +255,24 @@ obsidian-personal-finance-tracker/        ← GitHub 仓库（技能代码）
 │   ├── Accounts/                         # 账户列表
 │   └── Categories/                       # 分类规则
 ├── en/                                   # 🌎 English version (mirror of zh/)
-├── scripts/                              # 🐍 内部一致性校验脚本
+├── scripts/                              # 🐍 内部一致性校验脚本（10 个，零依赖）
 │   ├── validate_transaction.py           # 单笔校验（步骤 7.5）
-│   ├── daily_integrity_check.py          # 每日守恒
-│   ├── weekly_dashboard_check.py         # 周度结构
+│   ├── daily_integrity_check.py          # 每日守恒（V1.3.4 加 onboarding gate）
+│   ├── weekly_dashboard_check.py         # 周度结构（V1.3.4 加 onboarding gate）
+│   ├── weekly_summary.py                 # #35 周末复盘
+│   ├── monthly_summary.py                # #36 月末自检
+│   ├── credit_card_reminder.py           # #23 信用卡还款提醒
+│   ├── installment_check.py              # #24 分期完整性检查
+│   ├── installment_helper.py             # #24 分期模板生成器
+│   ├── loan_payment_reminder.py          # #37 贷款月供提醒
+│   ├── transaction_create.py             # #38 Agent 记账入口（写文件 + 5 层解析默认账户）
 │   └── lib/                              # 共享库（零依赖）
-│       ├── parsers.py                    # frontmatter 解析、转账配对
+│       ├── parsers.py                    # frontmatter 解析、转账配对、嵌套 YAML
 │       ├── balance.py                    # 余额计算核心
-│       └── notifier.py                   # 通知分发
+│       ├── notifier.py                   # 通知分发
+│       ├── default_account_resolver.py   # #38 5 层账户解析 (user/note/config/learning/fallback)
+│       ├── learning_tracker.py           # #38 ask_on_2nd 学习
+│       └── _onboarding_gate.py           # V1.3.4 未初始化时 INFO 跳过
 └── .gitignore                            # 忽略 Transactions/ 和 __pycache__/
 ```
 
@@ -283,6 +294,8 @@ cp ~/Project/obsidian-personal-finance-tracker/zh/Templates/*.md ~/Obsidian/fina
 cp ~/Project/obsidian-personal-finance-tracker/zh/Categories/*.md ~/Obsidian/finance/Categories/
 cp ~/Project/obsidian-personal-finance-tracker/zh/Dashboards/*.md ~/Obsidian/finance/Dashboards/
 cp ~/Project/obsidian-personal-finance-tracker/zh/Accounts/*.md ~/Obsidian/finance/Accounts/
+# 3.5 (V1.3.3+ #38) 复制默认账户规则 — transaction_create.py 必读
+cp ~/Project/obsidian-personal-finance-tracker/config/default_accounts.yaml ~/Obsidian/finance/
 
 # 4. 安装 AI Agent 技能
 aweskill install https://github.com/lovepigpanda/obsidian-personal-finance-tracker
@@ -294,9 +307,10 @@ aweskill agent add --agent claude-code skill obsidian-finance-track
 
 1. 在 Obsidian 中安装 **Dataview** 和 **Templater** 插件
 2. 复制 `zh/Templates/`、`zh/Dashboards/`、`zh/Accounts/`、`zh/Categories/` 到 `~/Obsidian/finance/`
-3. Templater → 新建笔记 → 选择 `expense-template.md` / `income-template.md` / `transfer-template.md`
-4. 打开 `~/Obsidian/finance/Dashboards/finance-dashboard.md` 查看财务概况
-5. 校验异常会在 `~/Obsidian/finance/Dashboards/alerts.md` 显示
+3. （V1.3.3+ #38）复制 `config/default_accounts.yaml` 到 `~/Obsidian/finance/`
+4. Templater → 新建笔记 → 选择 `expense-template.md` / `income-template.md` / `transfer-template.md`
+5. 打开 `~/Obsidian/finance/Dashboards/finance-dashboard.md` 查看财务概况
+6. 校验异常会在 `~/Obsidian/finance/Dashboards/alerts.md` 显示
 
 ### 🤖 Agent 主动行为 (Onboarding + 周期检查 + 主动建议)
 
@@ -566,14 +580,24 @@ obsidian-personal-finance-tracker/        ← GitHub repo (skill code)
 │   ├── Accounts/                         # Account list
 │   └── Categories/                       # Category rules
 ├── en/                                   # 🌎 English version (mirror of zh/)
-├── scripts/                              # 🐍 Internal consistency validation
+├── scripts/                              # 🐍 Internal consistency validation (10 scripts, zero-dep)
 │   ├── validate_transaction.py           # Per-transaction (Step 7.5)
-│   ├── daily_integrity_check.py          # Daily conservation
-│   ├── weekly_dashboard_check.py         # Weekly structure
+│   ├── daily_integrity_check.py          # Daily conservation (V1.3.4 added onboarding gate)
+│   ├── weekly_dashboard_check.py         # Weekly structure (V1.3.4 added onboarding gate)
+│   ├── weekly_summary.py                 # #35 Weekend recap
+│   ├── monthly_summary.py                # #36 Month-end check
+│   ├── credit_card_reminder.py           # #23 Credit card payment reminder
+│   ├── installment_check.py              # #24 Installment integrity check
+│   ├── installment_helper.py             # #24 Installment template generator
+│   ├── loan_payment_reminder.py          # #37 Loan payment reminder
+│   ├── transaction_create.py             # #38 Agent entrypoint (write files + 5-layer default account resolution)
 │   └── lib/                              # Shared lib (zero-dep)
-│       ├── parsers.py                    # Frontmatter parser, transfer pairing
+│       ├── parsers.py                    # Frontmatter parser, transfer pairing, nested YAML
 │       ├── balance.py                    # Balance calculation core
-│       └── notifier.py                   # Notification dispatcher
+│       ├── notifier.py                   # Notification dispatcher
+│       ├── default_account_resolver.py   # #38 5-layer account resolution (user/note/config/learning/fallback)
+│       ├── learning_tracker.py           # #38 ask_on_2nd learning
+│       └── _onboarding_gate.py           # V1.3.4 Skip with INFO when not initialized
 └── .gitignore                            # Ignores Transactions/ and __pycache__/
 ```
 
@@ -595,6 +619,8 @@ cp ~/Project/obsidian-personal-finance-tracker/zh/Templates/*.md ~/Obsidian/fina
 cp ~/Project/obsidian-personal-finance-tracker/zh/Categories/*.md ~/Obsidian/finance/Categories/
 cp ~/Project/obsidian-personal-finance-tracker/zh/Dashboards/*.md ~/Obsidian/finance/Dashboards/
 cp ~/Project/obsidian-personal-finance-tracker/zh/Accounts/*.md ~/Obsidian/finance/Accounts/
+# 3.5 (V1.3.3+ #38) Copy default account rules — required by transaction_create.py
+cp ~/Project/obsidian-personal-finance-tracker/config/default_accounts.yaml ~/Obsidian/finance/
 
 # 4. Install AI Agent skill
 aweskill install https://github.com/lovepigpanda/obsidian-personal-finance-tracker
@@ -606,9 +632,10 @@ aweskill agent add --agent claude-code skill obsidian-finance-track
 
 1. Install **Dataview** and **Templater** plugins in Obsidian
 2. Copy `zh/Templates/`, `zh/Dashboards/`, `zh/Accounts/`, `zh/Categories/` to `~/Obsidian/finance/`
-3. Templater → New Note → select `expense-template.md` / `income-template.md` / `transfer-template.md`
-4. Open `~/Obsidian/finance/Dashboards/finance-dashboard.md` to view financial overview
-5. Validation alerts appear in `~/Obsidian/finance/Dashboards/alerts.md`
+3. (V1.3.3+ #38) Copy `config/default_accounts.yaml` to `~/Obsidian/finance/`
+4. Templater → New Note → select `expense-template.md` / `income-template.md` / `transfer-template.md`
+5. Open `~/Obsidian/finance/Dashboards/finance-dashboard.md` to view financial overview
+6. Validation alerts appear in `~/Obsidian/finance/Dashboards/alerts.md`
 
 ### 🤖 Agent Proactive Behavior (Onboarding + Periodic Checks + Proactive Suggestions)
 

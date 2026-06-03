@@ -401,6 +401,32 @@ V1.0 defined the *principle* of being proactive; V1.1 turns it into 6 **concrete
 - `--month` for a month with no transactions → still output empty report
 - Current month not yet ended → cut off at today (no error)
 
+### L. #38 Default Account Resolution — `scripts/transaction_create.py` + `config/default_accounts.yaml` + `scripts/lib/learning_tracker.py`
+
+**Trigger**: User says "lunch 沙县 45 yuan" but **doesn't specify account**; or says "repayment" / "subway" / "gas" with semantic cues.
+
+**Agent responsibility**:
+1. **First-time Onboarding Step 3 extension** (V1.3.3): Tell user the 12 `config/default_accounts.yaml` rules: "I default to: repayment→CMB debit / subway+bus→transport card / gas→CMB credit / dining→CMB credit / HSR→CMB credit. OK to install? Change any?"
+2. **Auto-pick account on transaction**: When calling `scripts/transaction_create.py` without `--account` and note doesn't mention it, run 5-layer resolution: `user > note > config > learning > fallback` (priority high to low)
+3. **First time silent record**: learning.json increments count (don't disturb user)
+4. **Second time differs from first → ask** (`ask_on_2nd`): "You used 交通卡 for subway 早高峰 this time, but previous 地铁 was CMB (1 time). Change default? [change / keep / neither]"
+5. **Learning at "category + keyword" granularity only** (not coarse category): `extract_keywords` pulls 2-4 char Chinese fragments, "地铁早高峰" and "地铁晚高峰" are two independent rules
+
+**What scripts do**:
+- `default_account_resolver.py` 5-layer resolution: explicit `--account` > `account: 招商` in note > config 12 regex rules > learning.json history > fallback (most-used account)
+- `learning_tracker.py` increments count + handles ask_on_2nd + writes back to learning.json
+- `transaction_create.py` writes expense/income file to `Transactions/{type}/{out,in}/YYYY-MM-DD-{account}-{category}-{amount}.md`
+
+**Boundaries**:
+- ❌ Don't auto-call `installment_helper` to create installment groups (only when user explicitly says "installment")
+- ❌ Transfer type **MUST write both out + in files** (V1.3.3 fix: previously only one written, pair check would fail)
+- ✅ Learning only overrides config after user consent (default ask once)
+
+**Failure fallbacks**:
+- vault missing `config/default_accounts.yaml` → INFO prompt user to run `bash install.sh` or `cp config/default_accounts.yaml ~/Obsidian/finance/` manually
+- Same-named file exists → soft alert via `ask_message`, keep old file, don't force overwrite (per AGENTS.md preference: "file kept, agent asks fix/ignore/delete")
+- `--account` name not in `account-list.md` → ERROR, no silent fallback (would pollute learning)
+
 ---
 
 ## 🛡️ Boundary: Proactive ≠ Annoying

@@ -425,6 +425,11 @@ def main():
 
     vault = os.path.abspath(os.path.expanduser(args.vault))
 
+    # V1.3.4 Onboarding 守门: 未完成 onboarding 时跳过, 软告警 (不 ERROR)
+    from lib._onboarding_gate import gate_or_skip
+    if not gate_or_skip(vault, "daily_integrity_check.py"):
+        sys.exit(0)
+
     all_errors = []
     print("🔍 1/6 检查转账配对完整性...")
     all_errors += check_transfer_pairing(vault)

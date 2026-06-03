@@ -401,6 +401,32 @@ V1.0 阶段定义了"主动"的原则, V1.1 把它落地成 6 个**具体可调�
 - `--month` 指定月份无交易 → 仍输出空月报
 - 当月未结束 → 截止到今日 (不报错)
 
+### L. #38 默认账户解析 — `scripts/transaction_create.py` + `config/default_accounts.yaml` + `scripts/lib/learning_tracker.py`
+
+**触发**: 用户说"午餐沙县 45 元"但**没指定账户**;或说"还款" / "地铁" / "加油" 等带语义线索的输入。
+
+**Agent 责任**:
+1. **首次 Onboarding 步骤 3 扩展** (V1.3.3): 把 12 条 `config/default_accounts.yaml` 规则告诉用户: "我默认这样配: 还款→CMB 储蓄卡 / 地铁公交→交通卡 / 加油→招行信用卡 / 餐饮→招商信用卡 / 高铁→招行信用卡, 同意就装, 想改哪条?"
+2. **记账时自动选账户**: 调 `scripts/transaction_create.py` 时不传 `--account` 也不在 note 里写明, 走 5 层解析: `user > note > config > learning > fallback` (优先级从高到低)
+3. **第一次静默记录**: learning.json 累加 count (不打扰用户)
+4. **第二次跟第一次不同就询问** (`ask_on_2nd`): "你这次 地铁 早高峰 用 交通卡, 但之前 地铁 类都是用 CMB (1 次), 改默认吗? [改 / 保持 / 都不"
+5. **学习只按 "类别 + 关键词" 粒度** (不按粗 category): `extract_keywords` 提取 2-4 字中文片段, "地铁早高峰" 跟 "地铁晚高峰" 算两个独立 rule
+
+**脚本做什么**:
+- `default_account_resolver.py` 5 层解析: 用户显式 `--account` > note 里 `账户:招商` 字样 > config 12 条 regex 规则 > learning.json 历史偏好 > fallback (最常用的账户)
+- `learning_tracker.py` 累加 count + 处理 ask_on_2nd + 写回 learning.json
+- `transaction_create.py` 写 expense/income 文件到 `Transactions/{type}/{out,in}/YYYY-MM-DD-{account}-{category}-{amount}.md`
+
+**边界**:
+- ❌ 不要自动调 `installment_helper` 创建分期组 (那是用户显式说"分期"才调)
+- ❌ transfer 类型**必须同时写 out + in 两个文件** (V1.3.3 修复: 之前只写一个, 配对校验会失败)
+- ✅ learning 只在用户同意后才覆盖 config (默认 ask 一次)
+
+**失败兜底**:
+- vault 没 `config/default_accounts.yaml` → INFO 提示用户跑 `bash install.sh` 或手动 `cp config/default_accounts.yaml ~/Obsidian/finance/`
+- 同名文件已存在 → 走 `ask_message` soft alert, 保留旧文件, 不强制覆盖 (按 AGENTS.md 偏好: "文件保留, agent 询问 fix/ignore/delete")
+- `--account` 账户名不在 `account-list.md` → ERROR, 不静默 fallback (会污染学习)
+
 ---
 
 ## 🛡️ 边界: 主动 ≠ 打扰

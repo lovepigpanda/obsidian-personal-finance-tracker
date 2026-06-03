@@ -113,6 +113,12 @@ def main():
     args = ap.parse_args()
 
     vault = os.path.abspath(os.path.expanduser(args.vault))
+
+    # V1.3.4 Onboarding 守门
+    from lib._onboarding_gate import gate_or_skip
+    if not gate_or_skip(vault, "installment_check.py"):
+        sys.exit(0)
+
     errors = check_installments(vault)
 
     if not errors:

@@ -116,6 +116,11 @@ def main():
 
     vault = os.path.abspath(os.path.expanduser(args.vault))
 
+    # V1.3.4 Onboarding 守门
+    from lib._onboarding_gate import gate_or_skip
+    if not gate_or_skip(vault, "weekly_dashboard_check.py"):
+        sys.exit(0)
+
     print("🔍 检查仪表盘文件结构...")
     errors = check_dashboard_references(vault)
     print("🔍 检查账户表完整性...")
