@@ -59,9 +59,11 @@ triggers:
   - 余额
   - 账户
 version: V1.3
-# V1.3 = V1.2.1 + V1.1.3 余额快照增强 (cherry-pick 整合)
-# 远端 V1.2 / V1.2.1: 贷款字段 + reminder + 月度进度 + 安装文档
+# V1.3 = V1.2.1 (远端) + V1.1.3 余额快照 (本地) + V1.1.5 字段重设计 (本地, cherry-pick 整合)
+# 远端 V1.2: 贷款字段 4 列 + reminder + monthly_summary 进度段
+# 远端 V1.2.1: scripts/ 安装文档
 # 本地 V1.1.3: 预计算余额快照 (Dataview O(N)→O(1) 修复, transfer 不再漂移)
+# 本地 V1.1.5: 字段重设计 (起始+剩余不是同维度, 月供日 1-31 不写死)
 status: ACTIVE
 tags: [finance, obsidian, accounting, agent, nlp]
 author: lovepigpanda
@@ -702,15 +704,30 @@ python3 ~/Project/obsidian-personal-finance-tracker/scripts/loan_payment_reminde
 
 **触发条件**: 检测到 `Accounts/account-list.md` 中存在 `type: loan` 的账户。
 
-**校验内容**:
-- 贷款账户必填字段检查 (贷款总额 / 月供 / 剩余期数 / 起始月), 缺失报 INFO
-- 下次月供日计算: 起始月最后一天, 之后每月同日 (自动处理 2 月天数)
-- **≤5 天**: WARN ("月供临近, 金额 X")
-- **已过 ≤3 天未记账**: ERROR ("月供已过 X 天未还!")
-- **已过 4+ 天未记账**: ERROR ("严重逾期")
-- **当月已记账**: INFO ("已还, 下次月供...")
+**V1.1.5 关键设计**:
+- **起始日期 和 剩余期数 不是同一维度** — 起始 = 合同签的月 (不会变), 剩余 = 今天还差几期 (实时状态)
+- **已还期数** = 扫 `Transactions/expenses/` 里 `account=贷款账户` 的笔数 (从 vault 推算, 唯一真相源)
+- **下次月供日** = 第 `(已还期数 + 1)` 期的月供日
+- **月供日**用真实日期 (1-31), 不是写死的"月末"; 2 月 28/29 天自动用 `min(payment_day, 当月天数)`
+- **合同结束判定**: `已还期数 >= 合同总期数` → 报 INFO "应已结清"
+- **从未记账** (已还=0) → 报 INFO "未启用月供记账", **不报 ERROR 误报"严重逾期"**
 
-**支持 4 个贷款字段** (zh + en): `贷款总额/Principal` / `月供/Monthly Payment` / `剩余期数/Remaining Months` / `起始月/Start Month`
+**字段读取** (`lib/parsers.py`):
+- 必填 5 列: 贷款总额 / 月供 / 月供日 / 合同总期数 / 起始月
+- 可选 1 列: 剩余期数 (用于一致性校验)
+- 兜底: 5 个必填列全空时, 从"说明"列 regex 提取 (向后兼容老用户用自然语言写的 "贷款总额 1500000 / 月供 9195.37 / 月供日 31 / 240 期 / 起始 2024-01")
+- 老用户可不改账户表, 脚本也能跑; 但建议迁移到结构化列
+
+**校验内容**:
+- 必填字段缺失: INFO (不阻塞, 提示补)
+- 已还期数 + 剩余期数 ≠ 合同总期数: WARN (数据 stale)
+- 已还 = 0 但账户存在: INFO "未启用月供记账"
+- 已还 ≥ 合同总期数: INFO "应已结清"
+- 第 N 期月供日 < 今天 且未还: ERROR (逾期)
+- 第 N 期月供日 距今 ≤ 5 天 且未还: WARN (临近)
+- 第 N 期月供日 距今 > 5 天: INFO (远期)
+
+**支持 6 个贷款字段** (zh + en): `贷款总额/Principal` / `月供/Monthly Payment` / `月供日/Payment Day` / `合同总期数/Total Months` / `起始月/Start Month` / `剩余期数/Remaining Months` (可选)
 
 **配套**: `monthly_summary.py` 月末报告自动添加"💳 贷款账户进度"段 (贷款总额 / 已还 / 百分比 / 剩余期数)
 

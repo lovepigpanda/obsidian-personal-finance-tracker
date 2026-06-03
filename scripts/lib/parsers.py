@@ -7,7 +7,7 @@ parsers.py - Frontmatter 解析、转账配对检测
 import os
 import re
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 
 # Frontmatter 分隔符
@@ -140,10 +140,21 @@ def parse_accounts(vault_root: str) -> Dict[str, Dict]:
         - 账单日 / Statement Day                    -> statement_day (int, 信用卡)
         - 还款日 / Due Day                          -> due_day (int, 信用卡)
         - 信用额度 / Credit Limit                  -> credit_limit
-        - 贷款总额 / Principal                      -> principal (float, 贷款账户)
-        - 月供 / Monthly Payment                    -> monthly_payment (float, 贷款账户)
-        - 剩余期数 / Remaining Months              -> remaining_months (int, 贷款账户)
-        - 起始月 / Start Month                      -> start_month (YYYY-MM, 贷款账户)
+        - 贷款总额 / Principal                      -> principal (float, 贷款)
+        - 月供 / Monthly Payment                    -> monthly_payment (float, 贷款)
+        - 月供日 / Payment Day                      -> payment_day (int 1-31, 贷款)
+        - 合同总期数 / Total Months                 -> total_months (int, 贷款)
+        - 剩余期数 / Remaining Months               -> remaining_months (int, 贷款, 可选)
+        - 起始月 / Start Month                      -> start_month (str YYYY-MM, 贷款)
+
+    贷款字段说明:
+    - principal + monthly_payment + start_month + payment_day + total_months 是必填
+    - remaining_months 可选, 如果提供则用于"已还+剩余=合同"一致性校验
+    - payment_day 必须是 1-31 的真实扣款日, 脚本会按当月实际天数自动处理 (2 月 28/29, 30 天月等)
+
+    兜底: 如果贷款 5 个必填列都为空, 尝试从"说明"列自然语言提取 (如
+    "贷款总额 1500000 / 月供 9195.37 / 剩余 91 期 / 起始 2024-01")。
+    这是给老用户向后兼容 — 新用户请用结构化列。
     """
     acc_file = find_accounts_file(vault_root)
     if not acc_file:
@@ -160,10 +171,13 @@ def parse_accounts(vault_root: str) -> Dict[str, Dict]:
         "statement_day": ["账单日", "Statement Day", "Statement"],
         "due_day": ["还款日", "Due Day", "Due"],
         "credit_limit": ["信用额度", "Credit Limit", "Limit"],
-        "principal": ["贷款总额", "Principal", "Loan Amount"],
-        "monthly_payment": ["月供", "Monthly Payment", "Payment"],
-        "remaining_months": ["剩余期数", "Remaining Months", "Months Left"],
+        "principal": ["贷款总额", "Principal", "Total"],
+        "monthly_payment": ["月供", "Monthly Payment", "Monthly"],
+        "payment_day": ["月供日", "Payment Day", "Payment Date"],
+        "total_months": ["合同总期数", "贷款期数", "Total Months", "Term Months", "Total"],
+        "remaining_months": ["剩余期数", "Remaining Months", "Remaining"],
         "start_month": ["起始月", "Start Month", "Start"],
+        "note": ["说明", "Note", "Description"],
     }
 
     header_cols = []  # 头部: [(role, idx), ...]
@@ -215,6 +229,24 @@ def parse_accounts(vault_root: str) -> Dict[str, Dict]:
             except ValueError:
                 return None
 
+        # 贷款字段: 优先结构化列, 全空时从"说明"列 regex 兜底
+        principal = _float(row.get("principal", ""))
+        monthly = _float(row.get("monthly_payment", ""))
+        payment_day = _int(row.get("payment_day", ""))
+        total = _int(row.get("total_months", ""))
+        remaining = _int(row.get("remaining_months", ""))
+        start = (row.get("start_month", "") or "").strip() or None
+
+        if all(v is None or v == "" for v in (principal, monthly, payment_day, total, remaining, start)):
+            note_text = row.get("note", "") or ""
+            fallback = _parse_loan_note(note_text)
+            principal = principal or fallback.get("principal")
+            monthly = monthly or fallback.get("monthly_payment")
+            payment_day = payment_day if payment_day is not None else fallback.get("payment_day")
+            total = total if total is not None else fallback.get("total_months")
+            remaining = remaining if remaining is not None else fallback.get("remaining_months")
+            start = start or fallback.get("start_month")
+
         accounts[name] = {
             "currency": currency,
             "type": row.get("type", ""),
@@ -222,13 +254,75 @@ def parse_accounts(vault_root: str) -> Dict[str, Dict]:
             "statement_day": _int(row.get("statement_day", "")),
             "due_day": _int(row.get("due_day", "")),
             "credit_limit": _int(row.get("credit_limit", "")),
-            "principal": _float(row.get("principal", "")),
-            "monthly_payment": _float(row.get("monthly_payment", "")),
-            "remaining_months": _int(row.get("remaining_months", "")),
-            "start_month": row.get("start_month", "") or None,
+            "principal": principal,
+            "monthly_payment": monthly,
+            "payment_day": payment_day,
+            "total_months": total,
+            "remaining_months": remaining,
+            "start_month": start,
             "row": cells,
         }
     return accounts
+
+
+def _parse_loan_note(note_text: str) -> Dict[str, Any]:
+    """
+    兜底: 从'说明'列自然语言提取贷款字段。
+
+    格式: "贷款总额 1500000 / 月供 9195.37 / 月供日 25 / 240 期 / 起始 2024-01 / 平安银行"
+    支持 zh (贷款总额/月供/月供日/期数/起始) 和 en (Principal/Monthly/Payment Day/Term/Start)。
+
+    只在 5 个必填结构化列全空时调用。
+    """
+    result: Dict[str, Any] = {
+        "principal": None,
+        "monthly_payment": None,
+        "payment_day": None,
+        "total_months": None,
+        "remaining_months": None,
+        "start_month": None,
+    }
+    if not note_text:
+        return result
+
+    # 中文 key → 内部字段
+    patterns_zh = [
+        (r"贷款总额\s*[:：]?\s*([\d,]+\.?\d*)", "principal"),
+        (r"月供\s*[:：]?\s*([\d,]+\.?\d*)", "monthly_payment"),
+        (r"月供日\s*[:：]?\s*(\d{1,2})\s*[日号]?", "payment_day"),
+        (r"剩余\s*(\d+)\s*期", "remaining_months"),
+        (r"(?<!剩)总\s*(\d+)\s*期|(?<!剩)(\d+)\s*期总", "total_months"),  # "240 期总" / "总 240 期" / "240 期"
+        (r"起始\s*[:：]?\s*(\d{4}-\d{2})", "start_month"),
+    ]
+    # 英文 key (兼容)
+    patterns_en = [
+        (r"[Pp]rincipal\s*[:：]?\s*([\d,]+\.?\d*)", "principal"),
+        (r"[Mm]onthly(?:\s+[Pp]ayment)?\s*[:：]?\s*([\d,]+\.?\d*)", "monthly_payment"),
+        (r"[Pp]ayment\s+[Dd]ay\s*[:：]?\s*(\d{1,2})", "payment_day"),
+        (r"[Rr]emaining\s*[:：]?\s*(\d+)", "remaining_months"),
+        (r"[Tt]erm(?:\s+[Mm]onths)?\s*[:：]?\s*(\d+)", "total_months"),
+        (r"[Ss]tart(?:\s+[Mm]onth)?\s*[:：]?\s*(\d{4}-\d{2})", "start_month"),
+    ]
+
+    for pat, field in patterns_zh + patterns_en:
+        m = re.search(pat, note_text)
+        if not m:
+            continue
+        raw = m.group(1).replace(",", "")
+        if field in ("principal", "monthly_payment"):
+            try:
+                result[field] = float(raw)
+            except ValueError:
+                pass
+        elif field in ("payment_day", "remaining_months", "total_months"):
+            try:
+                result[field] = int(raw)
+            except ValueError:
+                pass
+        else:  # start_month 字符串
+            result[field] = raw
+
+    return result
 
 
 def find_transaction_files(vault_root: str) -> List[str]:

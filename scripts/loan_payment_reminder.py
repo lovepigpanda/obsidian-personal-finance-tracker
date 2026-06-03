@@ -25,8 +25,8 @@ loan_payment_reminder.py - 贷款月供提醒 (#37 贷款账户)
 import argparse
 import os
 import sys
-from calendar import monthrange
 from datetime import date
+from typing import Optional
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SCRIPT_DIR)
@@ -40,54 +40,19 @@ from lib.parsers import (
 from lib.notifier import notify
 
 
-def next_payment_date(start_month: str, today: date) -> date:
+def count_paid_periods(account: str, vault_root: str) -> int:
     """
-    给定起始月 (YYYY-MM), 计算下一次月供日 (用起始月最后一天作为基准日)。
+    扫 Transactions/expenses/ 里 account=指定贷款账户 的笔数。
+    简化: 假设每笔 expense = 1 期月供 (与 validate_transaction 的逻辑一致)。
 
-    简化处理: 起始月是 "2024-03" → 第一次月供 2024-03 的某一天 (用月末)。
-    之后每月同日。如果起始日是 31, 而 2 月只有 28 天, 用当月最后一天。
-
-    参数:
-        start_month: "YYYY-MM" 格式
-        today: 当前日期
-
-    返回:
-        下一次月供应到日期
+    返回: 已还期数
     """
-    year, month = map(int, start_month.split("-"))
-
-    # 起始月的月供日 = 起始月最后一天 (简化处理, 用户可在账户表里微调)
-    start_day = monthrange(year, month)[1]
-
-    # 找今天之后的下一个月供日
-    payment_year, payment_month = year, month
-    while True:
-        try:
-            candidate = date(payment_year, payment_month, start_day)
-        except ValueError:
-            # 起始日超过当月天数 (如 31 在 2 月)
-            last_day = monthrange(payment_year, payment_month)[1]
-            candidate = date(payment_year, payment_month, last_day)
-
-        if candidate >= today:
-            return candidate
-
-        # 下一月
-        payment_month += 1
-        if payment_month > 12:
-            payment_month = 1
-            payment_year += 1
-
-
-def paid_this_month(account: str, today: date, vault_root: str) -> bool:
-    """
-    检查指定贷款账户在当月是否已有一笔月供记账 (expense with account=loan)。
-
-    简化: 找当月所有 expense 中 account=指定贷款账户 的笔数 >= 1 即可。
-    """
-    files = find_transaction_files(vault_root)
-    for fp in files:
+    count = 0
+    for fp in find_transaction_files(vault_root):
         if file_status(fp) != "ACTIVE":
+            continue
+        # 只看 expense, 不看 transfer (transfer 是钱从一个账户到另一个, 不算还款)
+        if "/transfers/" in fp:
             continue
         fm, _ = parse_frontmatter(fp)
         if not fm:
@@ -96,19 +61,37 @@ def paid_this_month(account: str, today: date, vault_root: str) -> bool:
             continue
         if fm.get("account") != account:
             continue
-        d_str = str(fm.get("date", ""))
-        try:
-            d = date.fromisoformat(d_str)
-        except (ValueError, TypeError):
-            continue
-        if d.year == today.year and d.month == today.month:
-            return True
-    return False
+        count += 1
+    return count
+
+
+def check_consistency(acc_name: str, paid: int, remaining: Optional[int], total: int) -> Optional[str]:
+    """
+    校验 已还期数 + 剩余期数 == 总期数。
+
+    返回: None (一致) 或 错误消息字符串
+    """
+    if remaining is None:
+        return None  # 用户没填剩余, 没法校验
+    if paid + remaining != total:
+        return (
+            f"数据不一致: 已还 {paid} 期 + 剩余 {remaining} 期 = {paid + remaining}, "
+            f"但合同总期数 = {total} (差 {total - paid - remaining} 期)"
+        )
+    return None
 
 
 def check_loans(vault_root: str, warn_days: int = 5) -> list:
     """
     扫描所有 loan 账户, 检查月供状态。
+
+    核心算法 (V1.1.5):
+    1. 字段: 起始月 + 月供日 + 合同总期数 + 月供金额 (4 个必填) + 剩余期数 (可选, 用于校验)
+    2. 已还期数 = 扫 Transactions/expenses/ 里 account=贷款账户 的笔数
+    3. 一致性校验: 已还期数 + 剩余期数 == 合同总期数 (可选, 缺剩余期数不校验)
+    4. 下次月供日 = 起始月 + N 期 (N 是首个 >= 已还期数 的下一个月, 因为已还过的就不该再提醒)
+       实际日 = min(月供日, 当月天数) — 2 月自动 28/29
+    5. 合同结束月 = 起始月 + 总期数 - 1, 之后不提醒
 
     返回: list of (level, message) tuples
     """
@@ -122,19 +105,23 @@ def check_loans(vault_root: str, warn_days: int = 5) -> list:
 
         principal = acc.get("principal")
         monthly = acc.get("monthly_payment")
-        remaining = acc.get("remaining_months")
+        remaining = acc.get("remaining_months")  # 可选, 用于校验
         start = acc.get("start_month")
+        payment_day = acc.get("payment_day")
+        total = acc.get("total_months")
 
-        # 字段缺失: 给 INFO 提示, 不算错
+        # 必填字段检查
         missing = []
         if principal is None:
             missing.append("贷款总额")
         if monthly is None:
             missing.append("月供")
-        if remaining is None:
-            missing.append("剩余期数")
         if not start:
             missing.append("起始月")
+        if payment_day is None:
+            missing.append("月供日")
+        if total is None:
+            missing.append("合同总期数")
         if missing:
             errors.append((
                 "INFO",
@@ -143,74 +130,117 @@ def check_loans(vault_root: str, warn_days: int = 5) -> list:
             ))
             continue
 
-        # 计算下一次月供日
+        # 计算已还期数
+        paid_periods = count_paid_periods(acc_name, vault_root)
+
+        # 一致性校验: 只有 total 已知且 remaining 已知时才跑
+        # (如果 total 没填, 没法校验, 跳过)
+        if remaining is not None and total is not None:
+            err = check_consistency(acc_name, paid_periods, remaining, total)
+            if err:
+                errors.append(("WARN", f"🏦 贷款 {acc_name}: {err}"))
+
+        # 算"下次月供" = 第 (paid_periods + 1) 期
+        # 起始月 = 第 1 期, 第 N 期 = 起始月 + (N-1) 个月
+        target_period = paid_periods + 1
+        from calendar import monthrange as _mr
         try:
-            next_due = next_payment_date(str(start), today)
-        except (ValueError, AttributeError) as e:
+            sy, sm = map(int, str(start).split("-"))
+        except (ValueError, AttributeError):
+            errors.append(("WARN", f"贷款账户 {acc_name} 起始月格式错误: {start}"))
+            continue
+
+        # 第 target_period 期的 (年, 月)
+        target_total_months = sy * 12 + sm + (target_period - 1)
+        target_year = target_total_months // 12
+        target_month = target_total_months % 12
+        if target_month == 0:
+            target_month = 12
+            target_year -= 1
+
+        # 实际日 = min(payment_day, 当月天数)
+        last_day = _mr(target_year, target_month)[1]
+        actual_day = min(payment_day, last_day)
+        next_due = date(target_year, target_month, actual_day)
+
+        # 检查是否超过合同结束月
+        # 注意: 这里用 target_period > total 判断, 而不是 target_total_months > end_total_months
+        # 原因: target_period = paid_periods + 1, paid_periods=0 时 target_period=1, 永远不超期
+        # 真正"应已结清"是 paid_periods >= total (已还完)
+        if total is not None and paid_periods >= total:
+            # 算结束月信息
+            end_total_months = sy * 12 + sm + total - 1
+            end_year = end_total_months // 12
+            end_month_calc = end_total_months % 12
+            if end_month_calc == 0:
+                end_month_calc = 12
+                end_year -= 1
             errors.append((
-                "WARN",
-                f"贷款账户 {acc_name} 起始月格式错误: {start} ({e})",
+                "INFO",
+                f"🏦 贷款 {acc_name} 应已结清 (合同 {total} 期, 已还 {paid_periods} 期, "
+                f"结束月 {end_year}-{end_month_calc:02d}), 请检查账户表和交易记录",
+            ))
+            continue
+
+        # ⚠️ 关键: 如果从未记过月供 (paid_periods == 0), 不要报"严重逾期"
+        # 改报 INFO: "未启用月供记账, 如已开始还款请记 expense"
+        if paid_periods == 0:
+            total_info = f"{total} 期" if total is not None else "总期数未填"
+            errors.append((
+                "INFO",
+                f"🏦 贷款 {acc_name} 未启用月供记账 ({total_info}, 起始 {start}, "
+                f"月供 {monthly:.2f} {acc.get('currency','CNY')}). "
+                f"如已实际开始还款, 请记一条 expense (account={acc_name}, amount={monthly:.2f})",
             ))
             continue
 
         gap = (next_due - today).days
 
-        # 当月是否已还
-        paid = paid_this_month(acc_name, today, vault_root)
+        # 当月是否已还 (第 N 期正好是当月, 且 paid_periods == N-1 意味着还没还)
+        already_paid_this_period = (paid_periods >= target_period)
 
         if gap < 0:
-            # 逾期 (next_due 已是过去)
+            # 月供日已是过去 (说明漏还了)
             overdue = -gap
-            if paid:
-                # 已还, 没问题
+            if already_paid_this_period:
                 errors.append((
                     "INFO",
-                    f"🏦 贷款 {acc_name} 本月月供已还 ({monthly:.2f} {acc.get('currency','CNY')}), "
-                    f"下次月供 {next_due} (还有 {-gap + 30} 天左右)",
+                    f"🏦 贷款 {acc_name} 第 {target_period} 期已还 ({monthly:.2f} {acc.get('currency','CNY')})",
                 ))
             elif overdue <= 3:
                 errors.append((
                     "ERROR",
-                    f"🏦 贷款 {acc_name} 月供 {next_due} 已过 {overdue} 天未还! "
+                    f"🏦 贷款 {acc_name} 第 {target_period} 期 {next_due} 已过 {overdue} 天未还! "
                     f"({monthly:.2f} {acc.get('currency','CNY')})",
                 ))
             else:
                 errors.append((
                     "ERROR",
-                    f"🏦 贷款 {acc_name} 月供 {next_due} 已过 {overdue} 天严重逾期! "
+                    f"🏦 贷款 {acc_name} 第 {target_period} 期 {next_due} 已过 {overdue} 天严重逾期! "
                     f"({monthly:.2f} {acc.get('currency','CNY')})",
                 ))
         elif gap <= warn_days:
             # 临近 (0~5 天)
-            if paid:
+            if already_paid_this_period:
                 errors.append((
                     "INFO",
-                    f"🏦 贷款 {acc_name} 本月月供已还, "
-                    f"下次月供 {next_due} (还有 {gap} 天)",
+                    f"🏦 贷款 {acc_name} 第 {target_period} 期已还, 合同进度 {paid_periods}/{total}",
                 ))
             else:
                 errors.append((
                     "WARN",
-                    f"🏦 贷款 {acc_name} 月供 {next_due} 临近 (还有 {gap} 天), "
+                    f"🏦 贷款 {acc_name} 第 {target_period} 期 {next_due} 临近 (还有 {gap} 天), "
                     f"金额 {monthly:.2f} {acc.get('currency','CNY')}, "
-                    f"剩余 {remaining} 期",
+                    f"已还 {paid_periods}/{total} 期",
                 ))
         else:
-            # 远期 (>5 天), 仅当月未还才提醒
-            if paid:
-                errors.append((
-                    "INFO",
-                    f"🏦 贷款 {acc_name} 本月月供已还, "
-                    f"下次月供 {next_due} (还有 {gap} 天)",
-                ))
-            else:
-                # 上月还了但本月还没还 (例如今天 6-5, 下次月供 6-25, 但 6 月还没记账)
-                # 这种情况不强制 WARN, 仅 INFO
-                errors.append((
-                    "INFO",
-                    f"🏦 贷款 {acc_name} 下次月供 {next_due} (还有 {gap} 天), "
-                    f"金额 {monthly:.2f} {acc.get('currency','CNY')}, 剩余 {remaining} 期",
-                ))
+            # 远期 (>5 天)
+            errors.append((
+                "INFO",
+                f"🏦 贷款 {acc_name} 第 {target_period} 期 {next_due} (还有 {gap} 天), "
+                f"金额 {monthly:.2f} {acc.get('currency','CNY')}, "
+                f"已还 {paid_periods}/{total} 期",
+            ))
 
     return errors
 
