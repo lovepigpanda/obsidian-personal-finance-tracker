@@ -33,16 +33,26 @@ def next_statement_and_due(statement_day: int, due_day: int, today: date) -> tup
 
     假设出账日后 20 天内是还款日 (国内常见)。如果 due_day >= statement_day,
     还款日在出账当月；否则跨月 (出账日次月)。
+
+    修复 V1.3: 兼容 statement_day=31 在 30 天月/2 月的场景 (用 min(statement_day, 当月天数)
+    判定"是否过了本月出账日", 出账日也用月底有效日, 而不是硬塞导致 ValueError)。
     """
+    from calendar import monthrange
+
+    def month_effective_day(y, m, day):
+        """当月有效日: min(声明日, 当月最大天数)"""
+        return min(day, monthrange(y, m)[1])
+
     # 找下一次出账日
-    if today.day < statement_day:
-        next_stmt = date(today.year, today.month, statement_day)
+    this_month_stmt = month_effective_day(today.year, today.month, statement_day)
+    if today.day < this_month_stmt:
+        next_stmt = date(today.year, today.month, this_month_stmt)
     else:
         # 跳到下月
         if today.month == 12:
-            next_stmt = date(today.year + 1, 1, statement_day)
+            next_stmt = date(today.year + 1, 1, month_effective_day(today.year + 1, 1, statement_day))
         else:
-            next_stmt = date(today.year, today.month + 1, statement_day)
+            next_stmt = date(today.year, today.month + 1, month_effective_day(today.year, today.month + 1, statement_day))
 
     # 找对应还款日
     if due_day >= statement_day:
