@@ -158,7 +158,7 @@ AI Agent 处理步骤：
 ## ⚠️ 已知限制
 
 1. 多币种汇率需要手动维护（v1.1 规划自动汇率获取）
-2. 账户余额由 Dataview 实时计算，初始余额需在 `account-list.md` 中手动设置
+2. 账户余额由 `scripts/daily_integrity_check.py` 每日预计算为 `Accounts/balances.md` 快照, Dataview 只读快照 (性能 O(1))。初始余额需在 `account-list.md` 中手动设置。
 3. 国内银行 API 暂不支持，自动同步功能延后（v2.0）
 
 ---

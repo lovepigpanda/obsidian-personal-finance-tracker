@@ -10,7 +10,7 @@ tags: [finance, accounts]
 
 ## 账户定义
 
-> 账户余额由 Dataview 自动计算（初始余额 + 收入 - 支出），无需手动更新。
+> 账户余额由 `scripts/daily_integrity_check.py` 每日预计算, 写入 `Accounts/balances.md` 快照, Dataview 只读快照 (性能 O(1))。初始余额需在下方表格手动设置。
 
 | 账户名 | 类型 | 币种 | 初始余额 | 账单日 | 还款日 | 信用额度 | 贷款总额 | 月供 | 剩余期数 | 起始月 | 说明 | 状态 |
 |--------|------|------|---------|--------|--------|---------|---------|------|---------|--------|------|------|
@@ -40,39 +40,19 @@ tags: [finance, accounts]
 
 ## 账户余额实时计算
 
-> 以下由 Dataview 自动计算，每次打开文件时刷新
+> ✅ 此处由 Dataview 读 `Accounts/balances.md` 快照(由 `scripts/daily_integrity_check.py` 每日写入)。
+>
+> 不再每次打开都全扫描 Transactions/ — 性能 O(1),数据量 10w 笔也不卡。
+>
+> 余额算法: `initial_balance + sum(income) - sum(expense) - sum(transfer-out) + sum(transfer-in)`,见 `scripts/lib/balance.py`。
+> 强制刷新: `python3 scripts/daily_integrity_check.py`
 
-```dataviewjs
-// 获取所有账户
-const accounts = ["Cash", "Alipay", "WeChat Pay", "CMB", "ICBC", "Credit Card", "USD Account"];
-
-// 初始余额（手动维护）
-const initialBalances = {
-  "Cash": 0,
-  "Alipay": 0,
-  "WeChat Pay": 0,
-  "CMB": 0,
-  "ICBC": 0,
-  "Credit Card": 0,
-  "USD Account": 0
-};
-
-// 读取所有交易文件
-const expenses = dv.pages('"Transactions/expenses"').filter(p => p.status === "ACTIVE");
-const incomes = dv.pages('"Transactions/incomes"').filter(p => p.status === "ACTIVE");
-
-// 计算每个账户余额
-const results = [];
-for (const account of accounts) {
-  const cur = dv.current();
-  const expSum = expenses.filter(p => p.account === account).amount.sum() || 0;
-  const incSum = incomes.filter(p => p.account === account).amount.sum() || 0;
-  const balance = (initialBalances[account] || 0) + incSum - expSum;
-  results.push({ account, balance });
-}
-
-// 输出表格
-dv.table(["账户", "当前余额"], results.map(r => [r.account, r.balance]));
+```dataview
+table account as "账户", currency as "币种", balance as "当前余额"
+from "Accounts"
+where type = "balance-snapshot"
+flatten balances
+sort account asc
 ```
 
 ---

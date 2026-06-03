@@ -82,7 +82,7 @@ obsidian-personal-finance-tracker/
 ### 账户余额计算 / Account Balance Calculation
 
 - **初始余额**: 用户在 `Accounts/account-list.md` 中手动设置
-- **实时计算**: Dataview JS 汇总收入 - 支出 + 初始余额
+- **预计算快照**: `scripts/daily_integrity_check.py` 每日扫所有交易, 写入 `Accounts/balances.md` 快照。Dataview 读快照 (O(1)), 不再每次打开全扫描。算法: `initial_balance + sum(income) - sum(expense) - sum(transfer-out) + sum(transfer-in)`, 见 `scripts/lib/balance.py`
 - **多币种**: 各币种分别计算，不混算
 
 ---
@@ -184,7 +184,7 @@ created: YYYY-MM-DD
 ## 已知限制 / Known Limitations
 
 1. 多币种汇率需手动维护（v1.1 计划自动获取）
-2. 账户余额由 Dataview 实时计算，初始余额需在 `zh/Accounts/account-list.md` 中手动设置
+2. 账户余额由 `scripts/daily_integrity_check.py` 每日预计算为 `Accounts/balances.md` 快照, Dataview 只读快照 (性能 O(1))。初始余额需在 `zh/Accounts/account-list.md` 中手动设置
 3. 国内银行 API 暂不支持，自动同步功能延后（v2.0）
 
 ---

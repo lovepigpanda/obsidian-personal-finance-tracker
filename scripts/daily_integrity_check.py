@@ -21,6 +21,7 @@ import argparse
 import os
 import sys
 from collections import defaultdict
+from datetime import datetime
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SCRIPT_DIR)
@@ -324,6 +325,90 @@ def check_account_inactivity(vault_root: str, days: int = 14) -> list:
     return errors
 
 
+def write_balance_snapshot(vault_root: str) -> str:
+    """
+    把当前 compute_balances() 的结果写到 Accounts/balances.md 快照。
+    Dataview 仪表盘只读这个文件, 不再每次全扫描 Transactions/。
+
+    格式: frontmatter (YAML 数组 + 字典, 给 Dataview 解析) + 表格 body (人类可读)
+    写盘策略: 每次覆盖, 不追加 — 余额是"当前状态"不是"事件流"。
+    返回: 写入的绝对路径, 失败返回 ""。
+    """
+    balances = compute_balances(vault_root)
+    accounts = parse_accounts(vault_root)
+    if not balances:
+        return ""
+
+    def _yaml_str(s: str) -> str:
+        """YAML 字符串转义 (账户名有中文/特殊字符)。"""
+        return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+    # frontmatter balances 数组
+    fm_lines = []
+    for (acc, ccy), bal in sorted(balances.items()):
+        acc_type = accounts.get(acc, {}).get("type", "")
+        fm_lines.append(f"  - account: {_yaml_str(acc)}")
+        fm_lines.append(f"    currency: {_yaml_str(ccy)}")
+        fm_lines.append(f"    balance: {bal:.2f}")
+        if acc_type:
+            fm_lines.append(f"    type: {_yaml_str(acc_type)}")
+    fm_balances = "\n".join(fm_lines)
+
+    # frontmatter totals_by_currency 字典
+    by_ccy = defaultdict(float)
+    for (acc, ccy), bal in balances.items():
+        by_ccy[ccy] += bal
+    fm_totals = "\n".join(
+        f"  {ccy}: {total:.2f}" for ccy, total in sorted(by_ccy.items())
+    )
+
+    timestamp = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+    total_accounts = len(balances)
+    total_ccy = len(by_ccy)
+
+    # 人类可读表格
+    body_rows = []
+    for (acc, ccy), bal in sorted(balances.items()):
+        body_rows.append(f"| {acc} | {ccy} | {bal:,.2f} |")
+    body_table = "\n".join(body_rows)
+
+    content = (
+        "---\n"
+        'title: "Account Balance Snapshot — 账户余额快照"\n'
+        "type: balance-snapshot\n"
+        f'generated: "{timestamp}"\n'
+        "source: daily_integrity_check.py\n"
+        f"total_accounts: {total_accounts}\n"
+        f"total_currencies: {total_ccy}\n"
+        "balances:\n"
+        f"{fm_balances}\n"
+        "totals_by_currency:\n"
+        f"{fm_totals}\n"
+        "---\n\n"
+        "# 账户余额快照\n\n"
+        "> 此文件由 `scripts/daily_integrity_check.py` 自动生成, **不要手动编辑**。\n"
+        ">\n"
+        f"> 生成时间: {timestamp}\n"
+        f"> 账户数: {total_accounts} · 币种数: {total_ccy}\n"
+        "> 数据源: Python `compute_balances()` 完整扫描 + 累加\n\n"
+        "---\n\n"
+        "## 各账户余额 (人类可读)\n\n"
+        "| 账户 | 币种 | 余额 |\n"
+        "|------|------|------|\n"
+        f"{body_table}\n\n"
+        "---\n\n"
+        "## Dataview 提示\n\n"
+        "仪表盘 `Dashboards/finance-dashboard.md` 读 `type = balance-snapshot` 的 frontmatter `balances` 数组。\n"
+        "要强制刷新: 跑一次 `python3 scripts/daily_integrity_check.py --vault ~/Obsidian/finance`\n"
+    )
+
+    out_path = os.path.join(vault_root, "Accounts", "balances.md")
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    with open(out_path, "w", encoding="utf-8") as f:
+        f.write(content)
+    return out_path
+
+
 def main():
     ap = argparse.ArgumentParser(description="每日财务完整性检查")
     ap.add_argument(
@@ -353,6 +438,12 @@ def main():
     all_errors += check_bookkeeping_frequency(vault)
     print("🔍 6/6 #34 检查账户遗忘检测...")
     all_errors += check_account_inactivity(vault)
+    print("💾 7/7 写余额快照到 Accounts/balances.md...")
+    snapshot_path = write_balance_snapshot(vault)
+    if snapshot_path:
+        print(f"   快照写入: {snapshot_path}")
+    else:
+        print("   ⚠️  无账户数据, 跳过快照")
 
     if not all_errors:
         print("\n✅ 所有检查通过 — 财务系统内部一致")

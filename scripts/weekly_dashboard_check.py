@@ -45,12 +45,14 @@ def check_dashboard_references(vault_root: str) -> list:
 
     # 关键检查项
     checks = {
-        "expenses 目录引用": r'["\']\$\{vault[^}]*\}["\']|\bexpenses\b',
-        "incomes 目录引用": r'["\']\$\{vault[^}]*\}["\']|\bincomes\b',
+        "expenses 目录引用": r'["\']\${vault[^}]*}["\']|\bexpenses\b',
+        "incomes 目录引用": r'["\']\${vault[^}]*}["\']|\bincomes\b',
         "transfers/out 引用": r'transfers[/\\]out',
         "transfers/in 引用": r'transfers[/\\]in',
         "transfer_pair_id 字段引用": r'transfer_pair_id',
-        "DataviewJS 块": r'```dataviewjs',
+        # 余额块: 现在是 dataview 读 balances.md 快照,不再是 dataviewjs 自算
+        # 改成检查 balances.md 引用,更准确
+        "余额快照引用": r'balances\.md|type\s*=\s*["\']balance-snapshot["\']',
     }
     for name, pattern in checks.items():
         if not re.search(pattern, content):
@@ -92,7 +94,7 @@ def print_authoritative_balances(vault_root: str) -> None:
         print("(无账户数据)")
         return
 
-    print("\n📊 权威余额 (Python 计算) — 仪表盘 DataviewJS 显示应与此一致:")
+    print("\n📊 权威余额 (Python 计算) — 仪表盘 `Accounts/balances.md` 快照显示应与此一致:")
     print(f"  {'账户':<20} {'币种':<6} {'余额':>15}")
     print(f"  {'-' * 20} {'-' * 6} {'-' * 15}")
     for (acc, ccy), bal in sorted(balances.items()):

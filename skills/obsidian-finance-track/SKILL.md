@@ -58,7 +58,10 @@ triggers:
   - balance
   - 余额
   - 账户
-version: V1.2.1
+version: V1.3
+# V1.3 = V1.2.1 + V1.1.3 余额快照增强 (cherry-pick 整合)
+# 远端 V1.2 / V1.2.1: 贷款字段 + reminder + 月度进度 + 安装文档
+# 本地 V1.1.3: 预计算余额快照 (Dataview O(N)→O(1) 修复, transfer 不再漂移)
 status: ACTIVE
 tags: [finance, obsidian, accounting, agent, nlp]
 author: lovepigpanda
@@ -643,6 +646,12 @@ python3 ~/Project/obsidian-personal-finance-tracker/scripts/daily_integrity_chec
 3. 每币种的 transfer_in == transfer_out（转账自洽）
 4. Python 算余额 vs 累加验证（路径 A vs 路径 B 自洽——这是核心保证）
 5. 账户透支检查（软告警）
+
+**额外: 写余额快照** (V1.2 性能修复):
+- 跑完 6 项检查后, 步骤 7 自动把 `compute_balances()` 的结果写到 `Accounts/balances.md`
+- Dataview 仪表盘读这个文件, **不再每次打开都全扫描 Transactions/**
+- 10w 笔交易也能 O(1) 渲染
+- 强制刷新: `python3 scripts/daily_integrity_check.py --vault ~/Obsidian/finance`
 
 ### scripts/weekly_dashboard_check.py — 周度结构检查
 

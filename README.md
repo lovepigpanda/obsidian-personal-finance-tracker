@@ -322,7 +322,7 @@ aweskill agent add --agent claude-code skill obsidian-finance-track
 ## ⚠️ 已知限制
 
 1. 多币种汇率需要手动维护（v1.1 计划自动获取）
-2. 账户余额由 Python + Dataview 实时计算，初始余额需在 `Accounts/account-list.md` 中手动设置
+2. 账户余额由 Python + `Accounts/balances.md` 快照显示（`daily_integrity_check.py` 每日预计算），Dataview 只读快照，初始余额需在 `Accounts/account-list.md` 中手动设置
 3. 国内银行 API 暂不支持，自动同步功能延后（v2.0）
 4. 校验脚本是**内部一致性**检查（保证项目自己算的没错），**不**对接银行真余额
 5. `scripts/` 里的 `lib/` 用了 Python 3.8+ 的特性（f-string, type hints），不支持更老版本
