@@ -58,7 +58,7 @@ triggers:
   - balance
   - 余额
   - 账户
-version: V1.4
+version: V1.4.1
 # V1.3 = V1.2.1 (远端) + V1.1.3 余额快照 (本地) + V1.1.5 字段重设计 (本地, cherry-pick 整合)
 # 远端 V1.2: 贷款字段 4 列 + reminder + monthly_summary 进度段
 # 远端 V1.2.1: scripts/ 安装文档
@@ -83,6 +83,17 @@ version: V1.4
 #   修: lib/balance.py::compute_balances transfer 字段适配 (认 transfer-out/transfer-in + account 字段, 跟 build_frontmatter 对齐)
 #   改: transaction_create.py 写笔后自动调 refresh_balance_snapshot_incremental + 返回 balance_snapshot 字段
 #   测试: scripts/tests/test_incremental_balance.py (5 case, stdlib unittest, 零依赖)
+# V1.4.1: daily 完整性检查 "A vs B 差 320" 根因修复
+#   Bug: vault 2026-06-03 那笔 CMB→农业银行 320 用 type=transfer (历史老格式, 无 -out/-in 后缀)
+#        + 字段是 from_account/to_account (不是 account)
+#        compute_balances 之前用 type 判方向 + account 拿账户, 老格式都拿不到 → 漏算 320
+#        daily check_balances_self_consistent 走 from_account/to_account 累加 → 算出 320
+#        结果 A=13448.28, B=13128.28, 差 320 (农业银行反向)
+#   修: type=transfer (老格式) → 用 filepath 判方向 + from_account/to_account 拿账户, 跟 daily 100% 对齐
+#   补: scripts/tests/test_incremental_balance.py 加 TestLegacyTransferFormat 2 case (老格式独立 + 老新混存)
+#   顺手: V1.4 ship 时 hermes+aweskill 跟 github balance.py 实际已不一致, 这次 3 端 SHA 全部对齐
+#   Vault reproduce 修后: A=13128.28, B=13128.28, 差=0 ✅
+#   daily 重跑: 0 ERROR, 3 WARN (贷款账户遗忘, 老问题跟余额无关)
 status: ACTIVE
 tags: [finance, obsidian, accounting, agent, nlp]
 author: lovepigpanda
