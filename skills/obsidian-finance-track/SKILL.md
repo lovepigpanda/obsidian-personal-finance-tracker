@@ -290,7 +290,7 @@ Dataview 仪表盘（~/Obsidian/finance/Dashboards/finance-dashboard.md）自动
      ```
    - **踩坑历史**: V1.3.3 之前只 cp `scripts/`, V1.3.3 加 `config/` 后漏一次导致 default_accounts.yaml 缺失 → resolver 全走 fallback "Alipay" 而非用户预期 (e.g. "地铁" 应给交通卡)。详见 `references/v1.3.3-default-account-pitfalls.md` (P1, P2)
 4. **引导填账户列表** — 问"你有哪些账户", 帮写 `Accounts/account-list.md` (信用卡账户问账单日/还款日, 贷款账户问贷款总额/月供/剩余期数/起始月)
-5. **配置定时提醒** — **核心, 必须真交付 plist 模板!** 不要只问要不要。Agent 直接输出下面 6 段, 用户复制粘贴到 `~/Library/LaunchAgents/` 就行:
+5. **配置定时提醒** — **核心, 必须真交付 plist 模板 + 真装!** 不要只问要不要。V1.4+ 直接跑 `bash install.sh --install-plist` 装 7 段 plist 到 `~/Library/LaunchAgents/` 并 launchctl load, **不再让用户复制粘贴**:
    - **每日 18:00** 跑 daily_integrity_check.py
    - **每日 8:00** 跑 credit_card_reminder.py (#23)
    - **每日 8:05** 跑 installment_check.py (#24)
@@ -326,7 +326,7 @@ Dataview 仪表盘（~/Obsidian/finance/Dashboards/finance-dashboard.md）自动
      </dict>
      </plist>
      ```
-     其他 5 段类似, 改 Label / StartCalendarInterval / ProgramArguments。Agent 一次性生成 6 段, 用户 `mv ~/Downloads/com.finance.*.plist ~/Library/LaunchAgents/ && launchctl load ~/Library/LaunchAgents/com.finance.*.plist` 完成。
+     其他 6 段类似, 改 Label / StartCalendarInterval / ProgramArguments (install.sh --install-plist 自动生成全部 7 段, **不再需要手工复制**)。**⚠️ V1.4 历史踩坑**: V1.3.3 SKILL.md 模板把脚本名写成空格 `daily integrity_check.py` 是拼写错, 真实文件名是下划线 `daily_integrity_check.py`, V1.4 install.sh 已修
    - **⚠️ 历史踩坑 (V1.1.4 - V1.3.3)**: SKILL.md 一直写"agent 会帮用户配 plist", 但 4 个版本里 agent **从未真的生成 plist 内容**, 只在嘴上说"要不要配"。**这是承诺未交付的反例**。V1.3.3+ 强制: Onboarding 步骤 5 必须**真生成 plist 模板**, 不只是问。
 6. **配置通知偏好** — 主动问"校验失败时我用我自己的通道 (飞书/微信) 发给你, 还是写 alerts.md?"
 7. **保存配置 + 写哨兵** — 写到 `Accounts/agent-config.md` (用户可见、可改), **必须** 包含 `onboarded: true` 字段。模板见下方。
