@@ -64,25 +64,40 @@ def compute_balances(vault_root: str) -> Dict[Tuple[str, str], float]:
                 balances[(account, currency)] += amount
 
         elif tx_type == "transfer" or tx_type == "transfer-out" or tx_type == "transfer-in":
-            # 字段约定 (V1.3.4 build_frontmatter 真实产出):
-            #   - out 文件: type=transfer-out, account=from, to_account=to
-            #   - in  文件: type=transfer-in,  account=to,   to_account=from
-            # 注意: build_frontmatter 只写 account + to_account (没有 from_account 字段),
-            #       所以方向判断必须用 type 或 filepath, 不能用 from_account
-            amount_currency = (fm.get("amount"), currency)
-            if tx_type == "transfer-out" or "/transfers/out/" in filepath:
-                # out 视角: account 字段就是 from 账户, 减钱
+            # 字段约定有 2 套, 必须都支持, 跟 daily_integrity_check.check_balances_self_consistent
+            # (line 162-170, 累加法自检) 用同一套规则, 否则 A vs B 必不一致:
+            #
+            #   套 1 (V1.4 build_frontmatter 新格式):
+            #     out 文件: type=transfer-out, account=from, to_account=to
+            #     in  文件: type=transfer-in,  account=to,   to_account=from
+            #     → 方向: 用 type 字段, 账户: 用 account 字段
+            #
+            #   套 2 (历史老格式, vault 里 2026-06-03 那笔 CMB→农业银行 320 就是这种):
+            #     out 文件: type=transfer, from_account=from, to_account=to
+            #     in  文件: type=transfer, from_account=from, to_account=to
+            #     → 方向: 用 filepath (/transfers/out/ 减, /transfers/in/ 加)
+            #     → 账户: 用 from_account (out) / to_account (in)
+            #
+            # 判别: 优先用 type 字段 (V1.4 新格式自带方向); 只有 type=transfer 时回退到 filepath
+            if tx_type == "transfer-out":
                 from_acc = fm.get("account")
                 if from_acc:
                     balances[(from_acc, currency)] -= amount
-            elif tx_type == "transfer-in" or "/transfers/in/" in filepath:
-                # in 视角: account 字段就是 to 账户, 加钱
+            elif tx_type == "transfer-in":
                 to_acc = fm.get("account")
                 if to_acc:
                     balances[(to_acc, currency)] += amount
             else:
+                # type=transfer (老格式): 用 filepath 判方向 + from_account/to_account 拿账户
+                if "/transfers/out/" in filepath:
+                    from_acc = fm.get("from_account")
+                    if from_acc:
+                        balances[(from_acc, currency)] -= amount
+                elif "/transfers/in/" in filepath:
+                    to_acc = fm.get("to_account")
+                    if to_acc:
+                        balances[(to_acc, currency)] += amount
                 # 兜底: 通用 "transfer" 类型 + 不在 out/in 目录 (项目里不会发生, 仅安全网)
-                pass
 
     return dict(balances)
 

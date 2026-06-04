@@ -8,11 +8,12 @@ test_incremental_balance.py - V1.4 增量余额快照 e2e 测试
 测试隔离: 每个 case 用 tempfile.mkdtemp 建独立 vault, 测试结束清理,
 不污染 ~/Obsidian/finance/ 真实数据。
 
-测试覆盖 (4 个核心 case, 跟方案 B 设计对齐):
-  1. test_incremental_expense: 写 1 笔 expense → balances.md mtime 变 + 受影响账户值对 + 其他账户不变
-  2. test_incremental_transfer: 写 1 笔 transfer → 2 个账户都更新, 其他账户不变
-  3. test_fallback_when_no_existing: 删 balances.md 后写笔 → 自动 fallback 全量重算 (不崩)
-  4. test_daily_full_refresh: daily 跑后 source 字段 = "daily_integrity_check.py" (不污染)
+测试覆盖:
+  - V1.4 增量余额 (4 case): expense/transfer/fallback/source 字段
+  - V1.4.1 老格式兼容 (1 case): type=transfer + from_account/to_account
+       (历史遗留, vault 2026-06-03 那笔 CMB→农业银行 320 就是这种,
+        daily 自检发现的 A vs B 差 320 的真根因)
+  - V1.4 一致性 (1 case): 增量刷新 == 全量重算
 
 设计原则:
   - 不依赖任何外部 fixture, 每个 case 自建 vault
@@ -218,6 +219,148 @@ class TestIncrementalBalance(unittest.TestCase):
             content = f.read()
         self.assertIn("source: daily_integrity_check.py", content,
                       "daily 刷新应保留 source 字段")
+
+
+class TestLegacyTransferFormat(unittest.TestCase):
+    """
+    V1.4.1 修的 bug: 历史老格式 transfer 文件
+
+    2026-06-03 那笔 CMB→农业银行 320 的真实文件长这样:
+        type: transfer                ← 老格式, 不带 -out/-in
+        from_account: CMB
+        to_account: 农业银行
+    写盘路径在 /transfers/out/ 和 /transfers/in/ 里。
+
+    之前 compute_balances 用 type 字段判方向 + account 字段拿账户,
+    但老格式 type=transfer (无方向) + 没 account 字段, 所以 A 路径漏算 320,
+    daily 自检发现的 A vs B 差 320 正是这个。
+
+    修法: type 字段无方向时回退 filepath 判方向 + from_account/to_account 拿账户。
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="finance-test-legacy-")
+        self.vault = _make_minimal_vault(self.tmp)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_compute_balances_handles_legacy_transfer_format(self):
+        """老格式 type=transfer + from_account/to_account 应正确算入余额"""
+        # 手动写 2 个老格式文件 (out + in, 各 320)
+        # 跟 vault 里 2026-06-03 那笔真实结构一致
+        legacy_out = """---
+type: transfer
+date: 2026-06-03
+amount: 320
+currency: CNY
+category: Transfer
+from_account: CMB
+to_account: 农业银行
+transfer_pair_id: T-2026-06-03-testlegacy
+note: "老格式测试 out"
+tags: [transfer, finance]
+status: ACTIVE
+created: 2026-06-03
+---
+
+# 老格式 transfer out (CMB → 农业银行)
+"""
+        legacy_in = """---
+type: transfer
+date: 2026-06-03
+amount: 320
+currency: CNY
+category: Transfer
+from_account: CMB
+to_account: 农业银行
+transfer_pair_id: T-2026-06-03-testlegacy
+note: "老格式测试 in"
+tags: [transfer, finance]
+status: ACTIVE
+created: 2026-06-03
+---
+
+# 老格式 transfer in (农业银行 ← CMB)
+"""
+        out_path = os.path.join(
+            self.vault, "Transactions", "transfers", "out",
+            "2026-06-03-transfer-out-CMB-to-农业银行-320-CNY-ACTIVE.md"
+        )
+        in_path = os.path.join(
+            self.vault, "Transactions", "transfers", "in",
+            "2026-06-03-transfer-in-农业银行-from-CMB-320-CNY-ACTIVE.md"
+        )
+        with open(out_path, "w", encoding="utf-8") as f:
+            f.write(legacy_out)
+        with open(in_path, "w", encoding="utf-8") as f:
+            f.write(legacy_in)
+
+        # 全量重算 → CMB 应被 out 文件减 320, 农业银行(in 文件 字段)应被 in 文件加 320
+        # (注意: 老格式 in 文件账户是 to_account, 不是 account)
+        # 我们 fixture 里没设 "农业银行" 账户, 用 CMB 减 + 缺账户, 看主要逻辑
+        # 关键: 验证 A 路径对 CMB 正确处理 (漏算 320 是 bug)
+        b = compute_balances(self.vault)
+        # baseline CMB = 5000, 减 320 = 4680
+        self.assertAlmostEqual(
+            b[("CMB", "CNY")], 5000.0 - 320.0, places=2,
+            msg=f"老格式 transfer-out 应正确减 CMB 320, 实得 {b.get(('CMB','CNY'))}"
+        )
+
+    def test_legacy_and_new_format_coexist(self):
+        """老格式 + V1.4 新格式混存时, compute_balances 两者都应正确算"""
+        # 老格式 1 笔 320
+        legacy_out = """---
+type: transfer
+date: 2026-06-01
+amount: 100
+currency: CNY
+category: Transfer
+from_account: CMB
+to_account: Alipay
+transfer_pair_id: T-legacy-001
+note: "legacy"
+tags: [transfer]
+status: ACTIVE
+created: 2026-06-01
+---
+"""
+        with open(
+            os.path.join(self.vault, "Transactions", "transfers", "out",
+                         "2026-06-01-legacy-out.md"), "w", encoding="utf-8"
+        ) as f:
+            f.write(legacy_out)
+
+        # 新格式 1 笔 200 (走 create_transaction)
+        r = create_transaction(
+            vault_root=self.vault, type_="transfer",
+            date_=datetime.now().strftime("%Y-%m-%d"),
+            amount=200.0, currency="CNY", category="Transfer",
+            note="new format", account="CMB", to_account="Alipay",
+        )
+        self.assertTrue(r["ok"], f"新格式应成功: {r}")
+
+        b = compute_balances(self.vault)
+        # baseline CMB=5000, 老格式减 100 + 新格式减 200 = 4700
+        self.assertAlmostEqual(
+            b[("CMB", "CNY")], 4700.0, places=2,
+            msg=f"混存场景 CMB 应减 300, 实得 {b.get(('CMB','CNY'))}"
+        )
+        # baseline Alipay=1000, 新格式加 200 (老格式 in 文件的 to_account 是 Alipay, 也要加)
+        # 老格式 in 文件: 也要写一个
+        legacy_in = legacy_out.replace("transfer_pair_id: T-legacy-001", "transfer_pair_id: T-legacy-001")  # 同 id
+        legacy_in_path = os.path.join(
+            self.vault, "Transactions", "transfers", "in", "2026-06-01-legacy-in.md"
+        )
+        with open(legacy_in_path, "w", encoding="utf-8") as f:
+            f.write(legacy_out)
+        b = compute_balances(self.vault)
+        # 老格式 in 文件: to_account=Alipay, 加 100; 新格式 in: account=Alipay, 加 200
+        # = baseline 1000 + 100 + 200 = 1300
+        self.assertAlmostEqual(
+            b[("Alipay", "CNY")], 1300.0, places=2,
+            msg=f"混存场景 Alipay 应加 300, 实得 {b.get(('Alipay','CNY'))}"
+        )
 
 
 class TestIncrementalVsFullConsistency(unittest.TestCase):
