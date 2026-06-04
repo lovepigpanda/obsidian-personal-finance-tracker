@@ -39,6 +39,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SCRIPT_DIR)
 
 from lib.parsers import parse_accounts
+from lib.balance import refresh_balance_snapshot_incremental
 from lib.default_account_resolver import (
     load_config,
     resolve_default_account,
@@ -319,6 +320,34 @@ def create_transaction(
         else:
             written_paths.append(rel_path + " (dry-run)")
 
+    # V1.4 增量刷新: 写笔成功后, 立即刷新 Accounts/balances.md 快照
+    # 受影响账户: expense/income = 1 个, transfer = 2 个 (from + to)
+    if not dry_run:
+        if type_ == "transfer":
+            assert to_account_final is not None
+            affected = {final_account, to_account_final}
+        else:
+            affected = {final_account}
+        snapshot_path = refresh_balance_snapshot_incremental(
+            vault_root=vault_root,
+            affected_accounts=affected,
+            source="transaction_create.py",
+        )
+        if snapshot_path:
+            result_snapshot = {
+                "balance_snapshot": snapshot_path,
+                "affected_accounts": sorted(affected),
+                "trigger": "incremental",
+            }
+        else:
+            result_snapshot = {
+                "balance_snapshot": "",
+                "affected_accounts": sorted(affected),
+                "trigger": "failed",
+            }
+    else:
+        result_snapshot = None
+
     result = {
         "ok": True,
         "file_path": written_paths[0] if len(written_paths) == 1 else written_paths,
@@ -326,6 +355,8 @@ def create_transaction(
         "source": source,
         "ask_message": ask_message,
     }
+    if result_snapshot is not None:
+        result["balance_snapshot"] = result_snapshot
     if type_ == "transfer":
         result["transfer_pair_id"] = transfer_pair_id
         result["from_account"] = final_account

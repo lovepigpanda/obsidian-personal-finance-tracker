@@ -63,7 +63,7 @@ triggers:
   - balance
   - 余额
   - 账户
-version: V1.2.1
+version: V1.4
 status: ACTIVE
 tags: [finance, obsidian, accounting, agent, nlp]
 author: lovepigpanda
@@ -559,6 +559,47 @@ python3 ~/Project/obsidian-personal-finance-tracker/scripts/validate_transaction
 > AI Agent: "This entry failed validation (amount must be positive). Would you like: (a) I'll change it to 45 and re-save / (b) the amount really is 0 (rare, e.g. zero refund) so ignore this alert / (c) delete this entry and re-enter?"
 
 **Why validation is mandatory**: The user only inputs initial balances — all subsequent additions/subtractions are handled by the project. If the project's internal calculation breaks (transfer pair missing, field errors), the balance becomes wrong. The validation script guarantees **the project's own calculation never fails**.
+
+### Step 7.6: Real-time Balance Snapshot Refresh (V1.4 incremental — "balance is correct right after I log a transaction")
+
+**Problem** (V1.4 Evan report): The legacy `Accounts/balances.md` only refreshed once per day at 18:00 when `daily_integrity_check.py` ran. Users checking balance right after logging a transaction would see **yesterday's** balance — off by 1 entry, poor UX.
+
+**V1.4 fix**:
+- New `lib.balance.refresh_balance_snapshot_incremental(vault_root, affected_accounts, source)`
+- `transaction_create.py` automatically calls it after writing the transaction file (after Step 7.5, before Step 8)
+- Affected accounts: expense/income = 1; transfer = 2 (from + to)
+- `source` field is set to `transaction_create.py` for write-triggered refresh; daily 18:00 still uses `daily_integrity_check.py` — auditors can tell apart
+
+**Why not "strict O(1) performance optimization"**:
+- `compute_balances` must scan all Transactions to compute a single account's balance (income/expense can be spread across many files)
+- What is actually saved: avoiding re-reading parse_accounts + recomputing all unaffected account accumulations
+- At N=tens-of-entries scale, incremental vs full-refresh time difference is < 1ms
+- **Core value is not performance, it's "semantic clarity"**:
+  1. balances.md mtime changes immediately after logging (user perceives "real-time")
+  2. `source` field tells user "this refresh was triggered by a write" (audit clarity)
+  3. transfer trigger explicitly records both from/to got refreshed (not a silent full refresh)
+
+**Return value** (Agent-readable):
+```json
+{
+  "balance_snapshot": {
+    "balance_snapshot": "/Users/.../Accounts/balances.md",
+    "affected_accounts": ["Alipay"],
+    "trigger": "incremental"  // or "failed" (old snapshot corrupted, full-refresh fallback also failed)
+  }
+}
+```
+
+**Fallback safety net**:
+- Old `balances.md` corrupted/missing → `read_existing_balances()` returns None → uses full compute as fallback
+- `affected_accounts` is empty set (caller forgot to pass) → automatically falls back to full
+- vault completely empty (no accounts) → write fails, returns empty path, Agent sees `trigger: "failed"` as soft alert
+
+**V1.4 same-bundle fix: transfer balance bug** (pre-existing, not directly related to incremental, surfaced by writing transfer):
+- `lib.balance.compute_balances` previously only recognized `type: transfer` + `from_account`/`to_account` fields
+- In practice `transaction_create.py::build_frontmatter` produces `type: transfer-out`/`transfer-in` + `account` + `to_account`
+- After writing a transfer, the balance would never change (V1.3.4 had this all along, but daily 18:00 full refresh hid it — incremental refresh exposes it immediately)
+- V1.4 uses `type` field + `account` field to determine direction, aligning with build_frontmatter's actual output
 
 ---
 

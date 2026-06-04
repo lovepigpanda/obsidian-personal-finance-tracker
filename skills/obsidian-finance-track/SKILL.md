@@ -58,12 +58,31 @@ triggers:
   - balance
   - 余额
   - 账户
-version: V1.3
+version: V1.4
 # V1.3 = V1.2.1 (远端) + V1.1.3 余额快照 (本地) + V1.1.5 字段重设计 (本地, cherry-pick 整合)
 # 远端 V1.2: 贷款字段 4 列 + reminder + monthly_summary 进度段
 # 远端 V1.2.1: scripts/ 安装文档
 # 本地 V1.1.3: 预计算余额快照 (Dataview O(N)→O(1) 修复, transfer 不再漂移)
 # 本地 V1.1.5: 字段重设计 (起始+剩余不是同维度, 月供日 1-31 不写死)
+# V1.3.2: en 字段列同步 zh (14 列, 6 贷款字段)
+# V1.3.3: #38 默认账户解析 (5 层优先级: user > note > config > learning > fallback) + ask_on_2nd 学习机制
+#   新增: config/default_accounts.yaml (12 rules), scripts/lib/default_account_resolver.py,
+#         scripts/lib/learning_tracker.py, scripts/transaction_create.py (Agent 入口)
+#   扩展: scripts/lib/parsers.py (嵌套 YAML + 注释剥离 + parse_config_yaml)
+# V1.3.4: 修 7 个 P1+P2 已知问题 (commit bd355cf, 4 端 MD5 一致)
+#   P1 #5: zh+en AGENTS-PROACTIVE.md 加 #38 默认账户章节
+#   P1 #6: README.md 装技能 4 步加 cp config/default_accounts.yaml
+#   P1 #7: 仓库根加 install.sh (一键 cp + --dry-run + 软告警)
+#   P1 #8: transaction_create.py transfer 必写 out+in 共用 transfer_pair_id (V1.3.3 已知 bug 修复)
+#   P1 #9: transaction_create.py 加 type='error'/'ask' + 用户显式账户校验
+#   P2 #10: lib/_onboarding_gate.py + 5 脚本 main() 软跳过 (daily/credit/loan/installment/weekly_dashboard)
+#   P2 #12: README.md 9→10 脚本 (L9 + L163 表格 + zh/en 树完整列 10 个 .py + 6 lib)
+# V1.4: 实时余额刷新 (Evan 需求: 写笔后立即刷新 Accounts/balances.md, 不等 daily 18:00)
+#   新增: lib/balance.py::read_existing_balances / merge_balances / render_balance_snapshot / refresh_balance_snapshot_incremental
+#   重构: lib/balance.py::write_balance_snapshot 加 source 参数 + daily_integrity_check.py 改为 wrapper 调 lib.balance
+#   修: lib/balance.py::compute_balances transfer 字段适配 (认 transfer-out/transfer-in + account 字段, 跟 build_frontmatter 对齐)
+#   改: transaction_create.py 写笔后自动调 refresh_balance_snapshot_incremental + 返回 balance_snapshot 字段
+#   测试: scripts/tests/test_incremental_balance.py (5 case, stdlib unittest, 零依赖)
 status: ACTIVE
 tags: [finance, obsidian, accounting, agent, nlp]
 author: lovepigpanda
@@ -137,6 +156,7 @@ obsidian-personal-finance-tracker    ~/Obsidian/finance/
                                     │   └── transfers/         ← 每笔转账 2 个文件（out+in 配对）
                                     │       ├── out/           ← 转出文件
                                     │       └── in/            ← 转入文件
+                                    ├── default_accounts.yaml ← V1.3.3+ #38 默认账户规则 (跟仓库 config/ MD5 一致)
                                     └── SKILL.md              ← 本地技能副本
 ```
 
@@ -195,8 +215,6 @@ cp ~/Project/obsidian-personal-finance-tracker/zh/Templates/* ~/Obsidian/finance
         └── in/                    ← 转入文件
 ```
 
----
-
 ## 工作原理
 
 ```
@@ -213,8 +231,6 @@ AI Agent 读取 ~/Obsidian/finance/Categories/*.md（分类规则）
        ↓
 Dataview 仪表盘（~/Obsidian/finance/Dashboards/finance-dashboard.md）自动更新
 ```
-
----
 
 ## 触发条件
 
@@ -241,6 +257,8 @@ Dataview 仪表盘（~/Obsidian/finance/Dashboards/finance-dashboard.md）自动
 
 **判断标准**: 如果一件事**用户必须主动做**才能享受, 那就是 Agent 失职。
 
+**⚠️ 主动 ≠ 嘴上说**: agent 问"要不要我帮你配 plist" 但**不真的生成 plist 内容** = 失职。Onboarding 步骤 5 必须**直接给出 6 段可复制粘贴的 plist 模板** (见下方"步骤 5"), 不要只问要不要。
+
 ---
 
 ## 🚀 步骤 0: Onboarding (新用户引导)
@@ -251,21 +269,65 @@ Dataview 仪表盘（~/Obsidian/finance/Dashboards/finance-dashboard.md）自动
 
 1. **确认 vault 目录** — 默认 `~/Obsidian/finance`, 确认或改
 2. **验证必需文件** — 检查 Templates / Categories / Dashboards / Accounts 都在, 缺的主动帮 cp
-3. **⚠️ 安装/验证 scripts/ 脚本目录** (V1.2.1 新增, **必须**):
-   - **本技能的所有定时任务都依赖仓库根的 `scripts/` 目录**（`credit_card_reminder.py` / `installment_check.py` / `loan_payment_reminder.py` / `daily_integrity_check.py` / `weekly_summary.py` / `monthly_summary.py` 等 9 个脚本）。
-   - `aweskill install` **只同步** `skills/<skill-name>/` 目录到中央 store, **不同步** 仓库根的 `scripts/` → 如果用户用 aweskill 装本技能, 定时任务跑时会**找不到脚本**。
+3. **⚠️ 安装/验证 scripts/ 脚本目录 + config/ 配置目录** (V1.2.1 新增, V1.3.3 扩 config/, **必须**):
+   - **本技能的所有定时任务都依赖仓库根的 `scripts/` 目录**(`credit_card_reminder.py` / `installment_check.py` / `loan_payment_reminder.py` / `daily_integrity_check.py` / `weekly_summary.py` / `monthly_summary.py` / `transaction_create.py` / `installment_helper.py` / `weekly_dashboard_check.py` / `validate_transaction.py` = **10 个脚本**)。**V1.3.3+ 还依赖 `config/default_accounts.yaml`** (#38 默认账户规则的真相源)。
+   - `aweskill install` **只同步** `skills/<skill-name>/` 目录到中央 store, **不同步** 仓库根的 `scripts/` / `config/` → 如果用户用 aweskill 装本技能, 定时任务跑时会**找不到脚本** / 默认账户 fallback 到 user-specify only。
    - **Agent 主动帮用户** 执行以下任一方式:
      - **方式 A (推荐)**: `git clone https://github.com/lovepigpanda/obsidian-personal-finance-tracker.git ~/Project/obsidian-personal-finance-tracker` (一次性, 后续 `git pull` 同步)
-     - **方式 B**: `aweskill install --skill obsidian-finance-track` 后, Agent 主动 `cp <aweskill-store>/skills/obsidian-finance-track/scripts/* ~/Project/obsidian-personal-finance-tracker/scripts/` (首次手动, 后续 aweskill update 不会同步 scripts/)
-   - **验证**: Agent 跑 `ls ~/Project/obsidian-personal-finance-tracker/scripts/loan_payment_reminder.py`, 确认 9 个脚本都在, 缺哪个 cp 哪个
+     - **方式 B**: `aweskill install --skill obsidian-finance-track` 后, Agent 主动:
+       ```bash
+       mkdir -p ~/Project/obsidian-personal-finance-tracker/{scripts,config}
+       cp -r <aweskill-store>/skills/obsidian-finance-track/scripts/* ~/Project/obsidian-personal-finance-tracker/scripts/
+       cp <aweskill-store>/skills/obsidian-finance-track/config/default_accounts.yaml ~/Project/obsidian-personal-finance-tracker/config/ 2>/dev/null || echo "config/ 不在 aweskill store, 走方式 A"
+       cp ~/Project/obsidian-personal-finance-tracker/config/default_accounts.yaml ~/Obsidian/finance/default_accounts.yaml  # vault 端副本, resolver 跟 config/ 配对
+       ```
+   - **验证 (V1.3.3+ 必跑)**:
+     ```bash
+     ls ~/Project/obsidian-personal-finance-tracker/scripts/transaction_create.py  # #38 入口
+     ls ~/Project/obsidian-personal-finance-tracker/config/default_accounts.yaml   # #38 配置
+     md5 ~/Project/obsidian-personal-finance-tracker/config/default_accounts.yaml \
+         ~/Obsidian/finance/default_accounts.yaml  # 跟 vault 端一致 (避免 "config 不匹配 vault 真实账户名" 静默失败)
+     ```
+   - **踩坑历史**: V1.3.3 之前只 cp `scripts/`, V1.3.3 加 `config/` 后漏一次导致 default_accounts.yaml 缺失 → resolver 全走 fallback "Alipay" 而非用户预期 (e.g. "地铁" 应给交通卡)。详见 `references/v1.3.3-default-account-pitfalls.md` (P1, P2)
 4. **引导填账户列表** — 问"你有哪些账户", 帮写 `Accounts/account-list.md` (信用卡账户问账单日/还款日, 贷款账户问贷款总额/月供/剩余期数/起始月)
-5. **配置定时提醒** — **核心!** 主动问"要不要我帮你配以下定时任务?" (Agent 会**帮用户生成** plist/cron, 用户复制粘贴就行):
-   - **每日 18:00** 跑 daily_integrity_check.py (包括 #33 记账频率、#34 账户遗忘检测)
-   - **每周日 20:00** 跑 weekly_summary.py (#35 周末复盘)
-   - **每月最后一日 21:00** 跑 monthly_summary.py (#36 月末自检)
-   - **每日 8:00** 跑 credit_card_reminder.py (信用卡临近账单日/还款日时提醒, #23)
-   - **每日 8:05** 跑 installment_check.py (分期 PENDING 到期检查, #24)
-   - **每日 8:10** 跑 loan_payment_reminder.py (贷款月供提醒, #37)
+5. **配置定时提醒** — **核心, 必须真交付 plist 模板!** 不要只问要不要。Agent 直接输出下面 6 段, 用户复制粘贴到 `~/Library/LaunchAgents/` 就行:
+   - **每日 18:00** 跑 daily_integrity_check.py
+   - **每日 8:00** 跑 credit_card_reminder.py (#23)
+   - **每日 8:05** 跑 installment_check.py (#24)
+   - **每日 8:10** 跑 loan_payment_reminder.py (#37)
+   - **每周日 8:00** 跑 weekly_dashboard_check.py
+   - **每周日 20:00** 跑 weekly_summary.py (#35)
+   - **每月最后一日 21:00** 跑 monthly_summary.py (#36)
+   - **plist 模板** (Agent 必交付, 不可省):
+     ```xml
+     <?xml version="1.0" encoding="UTF-8"?>
+     <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+     <plist version="1.0">
+     <dict>
+         <key>Label</key>
+         <string>com.finance.daily-integrity</string>
+         <key>ProgramArguments</key>
+         <array>
+             <string>/usr/bin/python3</string>
+             <string>/Users/wuhaojuan/Project/obsidian-personal-finance-tracker/scripts/daily_integrity_check.py</string>
+             <string>--vault</string>
+             <string>/Users/wuhaojuan/Obsidian/finance</string>
+         </array>
+         <key>StartCalendarInterval</key>
+         <dict>
+             <key>Hour</key><integer>18</integer>
+             <key>Minute</key><integer>0</integer>
+         </dict>
+         <key>RunAtLoad</key><true/>
+         <key>StandardOutPath</key>
+         <string>/tmp/finance-daily-integrity.log</string>
+         <key>StandardErrorPath</key>
+         <string>/tmp/finance-daily-integrity.err.log</string>
+     </dict>
+     </plist>
+     ```
+     其他 5 段类似, 改 Label / StartCalendarInterval / ProgramArguments。Agent 一次性生成 6 段, 用户 `mv ~/Downloads/com.finance.*.plist ~/Library/LaunchAgents/ && launchctl load ~/Library/LaunchAgents/com.finance.*.plist` 完成。
+   - **⚠️ 历史踩坑 (V1.1.4 - V1.3.3)**: SKILL.md 一直写"agent 会帮用户配 plist", 但 4 个版本里 agent **从未真的生成 plist 内容**, 只在嘴上说"要不要配"。**这是承诺未交付的反例**。V1.3.3+ 强制: Onboarding 步骤 5 必须**真生成 plist 模板**, 不只是问。
 6. **配置通知偏好** — 主动问"校验失败时我用我自己的通道 (飞书/微信) 发给你, 还是写 alerts.md?"
 7. **保存配置 + 写哨兵** — 写到 `Accounts/agent-config.md` (用户可见、可改), **必须** 包含 `onboarded: true` 字段。模板见下方。
 8. **试一笔** — 验证整个流程通
@@ -320,6 +382,11 @@ scheduled_tasks:
 - Agent 只在**用户开会话**时才在线。会话关了, Agent 就"睡"了。
 - 想让 Agent 主动提醒用户 ("该还款了"/"今天没记账"), Agent 必须在**指定时间被唤醒**——只有系统定时任务能保证。
 - Agent 的责任是**主动帮用户配**定时任务 + **主动分析 alerts.md**, 不是逃避定时任务。
+
+**为什么不只靠 agent 的嘴上承诺**:
+- V1.1.4 → V1.3.3 共 4 个版本, agent 一致告诉用户"我会帮你配 plist" 但**没真配过一次** (`~/Library/LaunchAgents/` 一直空, 7 个脚本从未自动跑)
+- 用户记不住手动跑, 主动管家能力 = 0
+- **V1.3.4+ 硬性要求**: Onboarding 步骤 5 不只问"要不要配", **必交付 plist 模板** (见上方"plist 模板" 段)
 
 ---
 
@@ -377,7 +444,6 @@ scheduled_tasks:
 | Shopping | 淘宝、京东、拼多多、超市 | Taobao、JD、Pinduoduo、shopping |
 | Entertainment | 电影、游戏、会员、Steam | movie、game、Netflix、Steam |
 | Health | 医院、药店、体检 | hospital、pharmacy、checkup |
-| Education | 课程、书籍、培训 | course、book、training |
 | Housing | 房租、物业、水电 | rent、property、utilities |
 | Communication | 话费、宽带、流量 | phone、broadband、data |
 | Gift | 红包、礼物、人情 | red envelope、gift、treat |
@@ -409,7 +475,7 @@ scheduled_tasks:
 | ICBC | 工行、工商银行 | ICBC |
 | Credit Card | 信用卡 | Credit Card |
 | Cash | 现金 | Cash |
-| USD Account | 美元账户 | USD Account |
+| USD Account | 美元账户、USD Account |
 
 ### 步骤 4.5：默认账户解析（V1.3.3+ #38）
 
@@ -448,6 +514,22 @@ python3 scripts/transaction_create.py \
 ```
 
 如果 `ask_message` 非空, Agent **必须**用 `clarify` 工具问用户, **不要**直接创建文件。
+
+**✅ V1.3.4 transfer 双写已修复** (P1 #8): `transaction_create.py --type transfer` 现在**必写 out+in 两个文件, 共用 transfer_pair_id**, 不再触发 `daily_integrity_check.py` "孤立 transfer out" 错误。Agent 直接调 `--type transfer --account X --to-account Y` 即可, V1.3.3 之前 "改用 expense+income 两个独立调用" 的 workaround 已废弃。详见 `references/v1.3.4-fixes-and-pitfalls.md` 修复 1。
+
+**V1.3.3 实战踩坑** (详见 `references/v1.3.3-default-account-pitfalls.md`):
+- `aweskill install` 不复制 `scripts/` 也不复制 `config/`, 必须手动 `cp` 或用 V1.3.4+ `install.sh`
+- Hermes 端路径是 `~/.hermes/skills/<category>/obsidian-finance-track/`, 不是 `~/.hermes/skills/obsidian-finance-track/`
+- vault 端 `default_accounts.yaml` 必须 cp 到 `~/Obsidian/finance/`, 跟 `account-list.md` 同级 (vault 没 `config/` 目录)
+- resolver 端到端测试必须覆盖 transfer, 不能只测 expense
+
+**V1.3.4 实战踩坑** (详见 `references/v1.3.4-fixes-and-pitfalls.md`):
+- 端到端测试**必用隔离 vault** (`tempfile.mkdtemp`), 不能直接复制 vault (会把 vault 旧 Transactions 也复制, 污染断言)
+- 测试必加 `agent-config.md` (V1.3.4+ gate 检查需要)
+- 测试必清 `~/.obsidian-finance/learning.json` (避免旧数据污染)
+- 真实跑 `--quiet` 不一定支持, 看 `python3 script.py --help`
+- `parse_accounts()` 期望 markdown 表格格式, **不解析 frontmatter 格式** (AGENTS.md 教学例子是 frontmatter, 实际数据是表格, 测试代码必复制 vault 真实格式)
+- Pyright 看不到 type narrowing, 跨分支赋值的 for 循环必加 `assert final_account is not None` 帮 narrow
 
 ### 步骤 5：生成文件名
 
@@ -551,6 +633,44 @@ python3 ~/Project/obsidian-personal-finance-tracker/scripts/validate_transaction
 
 **为什么必须跑校验**：用户只输入初始余额，所有加减都是项目处理——如果项目内部计算错（转账配对丢失、字段填错），余额就不准了。校验脚本保证**项目自己算的不会错**。
 
+### 步骤 7.6：实时刷新余额快照（V1.4 增量 — 用户感知"刚记完账,余额就准了"）
+
+**问题** (V1.4 Evan 报告): 旧版 `Accounts/balances.md` 只在每日 18:00 `daily_integrity_check.py` 跑时刷新一次, 用户查余额看到的总是**昨天的**。**写完一笔后立刻看仪表盘**,数字跟真实情况差 1 笔,体验差。
+
+**V1.4 修复**:
+- 新增 `lib.balance.refresh_balance_snapshot_incremental(vault_root, affected_accounts, source)`
+- `transaction_create.py` 写完交易文件**自动**调一次 (步骤 7.5 之后, 步骤 8 之前)
+- 受影响账户: expense/income = 1 个; transfer = 2 个 (from + to)
+- 写盘时 `source` 字段填 `transaction_create.py`,daily 全量跑仍填 `daily_integrity_check.py`,审计可分辨
+
+**为什么不"严格 O(1) 性能优化"**:
+- `compute_balances` 算单个账户余额需要扫全 Transactions (因为收入/支出可能分布在多个文件)
+- 真正"省"的是: 避免重读 parse_accounts + 重算所有未受影响账户的累加
+- 在 N=几十笔的规模下, 增量 vs 全量时间差 < 1ms
+- **核心价值不在性能, 在"语义清晰"**: 写笔后 balances.md mtime 立刻变 (用户感知"实时") + source 字段告诉用户"这次刷新是写笔触发的" (审计清晰) + transfer 触发时, 显式记录 from/to 都被刷 (不是静默全量)
+
+**返回值** (Agent 可读):
+```json
+{
+  "balance_snapshot": {
+    "balance_snapshot": "/Users/.../Accounts/balances.md",
+    "affected_accounts": ["Alipay"],
+    "trigger": "incremental"  // 或 "failed" (旧快照损坏, fallback 全量也失败)
+  }
+}
+```
+
+**Fallback 安全网**:
+- 旧 `balances.md` 损坏 / 不存在 → `read_existing_balances()` 返 None → 用全量 compute 兜底
+- `affected_accounts` 为空集 (调用方忘了传) → 自动 fallback 全量
+- vault 完全空 (没账户) → 写空文件失败,返空路径,Agent 看到 `trigger: "failed"` 软告警
+
+**V1.4 同 bundle 修复的 transfer 余额 bug** (跟增量无关, 写笔时必现):
+- `lib.balance.compute_balances` 之前只认 `type: transfer` + `from_account`/`to_account` 字段
+- 实际 `transaction_create.py::build_frontmatter` 产出的是 `type: transfer-out`/`transfer-in` + `account` + `to_account`
+- 写 transfer 后, 余额永远不变 (V1.3.4 一直有, 但 daily 18:00 跑全量时是全天累计, 用户感知不到, 增量立刻刷新就暴露了)
+- V1.4 改用 `type` 字段 + `account` 字段推方向, 跟 build_frontmatter 实际产出对齐
+
 ---
 
 ## 完整示例
@@ -653,6 +773,7 @@ python3 ~/Project/obsidian-personal-finance-tracker/scripts/validate_transaction
 | 收入模板 | `~/Obsidian/finance/Templates/income-template.md` |
 | 转账模板 | `~/Obsidian/finance/Templates/transfer-template.md` |
 | **账本数据** | `~/Obsidian/finance/Transactions/{expenses,incomes,transfers/{out,in}}/` |
+| **V1.3.3+ 默认账户规则** | `~/Obsidian/finance/default_accounts.yaml` (跟仓库 `config/default_accounts.yaml` MD5 一致) |
 
 ---
 
@@ -661,6 +782,21 @@ python3 ~/Project/obsidian-personal-finance-tracker/scripts/validate_transaction
 项目自带的 Python 校验脚本, **零依赖**（仅用 Python 3.8+ 标准库）。所有用户、所有平台、所有 AI Agent 都能用。
 
 **核心定位变化**: 脚本本身**不**自动跑、不依赖系统 cron、不发 webhook——**全部由 Agent 主动调用 + 用 Agent 自己的通道通知**。
+
+**当前共有 10 个脚本** (V1.3.3+ 新增 `transaction_create.py`, 早期文档 "9 个脚本" 已过期):
+
+| # | 脚本 | 触发时机 | 用途 |
+|---|------|---------|------|
+| 1 | `validate_transaction.py` | Agent 写完每笔后立即 (步骤 7.5) | 必填字段、金额 > 0、日期合法、币种合法、账户已注册、transfer 配对完整 |
+| 2 | `daily_integrity_check.py` | Agent 会话开始 + 每日 18:00 launchd | transfer 配对守恒、Python 余额自洽、透支检查、#33 记账频率、#34 账户遗忘检测、**写 balances.md 快照** |
+| 3 | `weekly_dashboard_check.py` | Agent 周日 8:00 主动调 | 仪表盘文件结构、账户表完整、打印权威余额 |
+| 4 | `credit_card_reminder.py` | Agent 帮用户配每日 8:00 launchd (#23) | 信用卡出账日/还款日提醒 (WARN: ≤5 天) |
+| 5 | `installment_check.py` | Agent 帮用户配每日 8:05 launchd (#24) | 分期组完整性、PENDING 到期提醒 |
+| 6 | `installment_helper.py` | 用户写完第一期 expense 时立即调 (#24) | 从第一期生成 N-1 个 PENDING 期模板 |
+| 7 | `loan_payment_reminder.py` | Agent 帮用户配每日 8:10 launchd (#37) | 贷款月供提醒 (WARN: ≤5 天, ERROR: 已过未还) |
+| 8 | `weekly_summary.py` | Agent 帮用户配每周日 20:00 launchd (#35) | 本周笔数 / 收支 / 分类前 3 / 同比上周，写 alerts.md |
+| 9 | `monthly_summary.py` | Agent 帮用户配每月最后一日 21:00 launchd (#36) | 本月笔数 / 收支 / 储蓄率 / 跨账户流量，写 alerts.md |
+| 10 | `transaction_create.py` | Agent 解析完用户输入 (V1.3.3+ #38) | 默认账户解析 (5 层优先级) + ask_on_2nd 学习机制 |
 
 ### scripts/validate_transaction.py — 单笔校验
 
@@ -724,7 +860,7 @@ python3 ~/Project/obsidian-personal-finance-tracker/scripts/credit_card_reminder
 **何时用**: Agent 解析完用户自然语言、准备创建交易 .md 文件时。
 
 ```bash
-python3 ~/Project/obsidian-personal-finance-tracker/scripts/transaction_create.py \
+python3 scripts/transaction_create.py \
   --vault ~/Obsidian/finance \
   --type expense \
   --date 2026-06-03 \
@@ -749,8 +885,15 @@ python3 ~/Project/obsidian-personal-finance-tracker/scripts/transaction_create.p
 - 学习机制 (ask_on_2nd): 第一次静默记录, 第二次冲突时 `ask_message` 返回询问文本, Agent 必须用 `clarify` 工具问用户
 - transfer 类型必须显式 `--account` + `--to-account`, 不走默认
 
+**V1.3.4+ transfer 双写已修复** (P1 #8): `transaction_create.py --type transfer` 现在**必写 out+in 两个文件, 共用 transfer_pair_id**, 不再像 V1.3.3 那样只写 out 触发 `daily_integrity_check.py` "孤立 transfer out" 错误。Agent 直接调 `--type transfer --account X --to-account Y` 即可, 无需用 expense+income 两个独立调用 workaround。
+
+**V1.3.4 错误类型** (P1 #9): 返回 JSON 加 `type` 字段:
+- `type="ok"` (无字段, 隐含) — 成功
+- `type="ask"` + `ask_message` — 软告警, Agent 用 `clarify` 问用户 (同名文件存在, resolver 5 层失败)
+- `type="error"` + `message` — 硬错误, Agent 中止 (账户名错, 缺必要参数, 未知 type)
+
 **前置**:
-- `config/default_accounts.yaml` 存在 (仓库模板跟 vault 同步)
+- `config/default_accounts.yaml` 存在 (仓库模板跟 vault 同步, MD5 一致)
 - vault 端 `Accounts/account-list.md` 有账户定义
 
 ### scripts/installment_check.py — 分期完整性检查 (#24)
@@ -810,7 +953,7 @@ python3 ~/Project/obsidian-personal-finance-tracker/scripts/loan_payment_reminde
 **何时用**: 用户写完第一期 expense 后, Agent **立即调**。
 
 ```bash
-python3 ~/Project/obsidian-personal-finance-tracker/scripts/installment_helper.py create \
+python3 scripts/installment_helper.py create \
   --first-file ~/Obsidian/finance/Transactions/expenses/<第一期文件> \
   --total 12
 ```
@@ -893,5 +1036,22 @@ aweskill agent add --agent claude-code skill obsidian-finance-track
 
 ---
 
-> Skill: obsidian-finance-track | Version: V1.0 | For AI Agent use
+## 📚 References (V1.x 沉淀文档)
+
+类级经验沉淀, 未来 V1.x 增量 batch / bug 修复先翻这里:
+
+- **`references/v1.4-incremental-balance-workflow.md`** ⭐ — V1.4 增量余额刷新的 5 个工作流模式 (改前备份 / stdlib unittest / e2e 探测预存在 bug / 真 vault 清理 / 语义价值优先). V1.x 增量 batch 必读
+- `references/v1.4-fixes-and-pitfalls.md` — V1.4 ship 详细记录 (修复 1 实时刷新 + 修复 2 transfer 字段 bug + Self-audit + commit 模板)
+- `references/v1.3.4-fixes-and-pitfalls.md` — V1.3.4 端到端测试隔离坑 6/7/8 (parse_accounts 表格格式 / Pyright assert narrow / `--quiet` flag 兼容性). V1.x 改 test 必读
+- `references/v1.3.3-default-account-pitfalls.md` — V1.3.3 之前 #38 默认账户踩坑
+- `references/scripts-architecture.md` — scripts/ 设计原理
+- `references/development-pitfalls.md` — 开发时通用踩坑
+- `references/sibling-collision-and-cross-doc-check.md` — 改 SKILL.md 时的 sibling collision 风险
+- `references/patch-tool-pitfalls.md` — patch 工具踩坑
+- `references/project-location.md` — 项目路径速查
+
+---
+
+> Skill: obsidian-finance-track | Version: V1.4 | For AI Agent use
 > Project: https://github.com/lovepigpanda/obsidian-personal-finance-tracker
+> Last commit: `V1.4 (local)` (实时余额刷新 + transfer 字段 bug 修复) — 等 Evan 决策 A/B/C ship 方式
