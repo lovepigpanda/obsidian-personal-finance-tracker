@@ -43,7 +43,10 @@ from lib.notifier import notify
 
 REQUIRED_FIELDS = ["type", "date", "amount", "currency", "status"]
 VALID_CURRENCIES = {"CNY", "USD", "EUR", "HKD", "JPY", "GBP"}
-VALID_TYPES = {"expense", "income", "transfer"}
+# V1.4: transfer 拆成 transfer-out / transfer-in 两个独立 type (各自一个文件) + account + to_account
+# V1.3 老格式: type=transfer + from_account + to_account (out/in 文件 frontmatter 一致)
+# 两种格式 vault 都有, 都得能校验
+VALID_TYPES = {"expense", "income", "transfer", "transfer-out", "transfer-in"}
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
@@ -105,23 +108,25 @@ def validate(filepath: str, vault_root: str) -> list:
         elif account not in registered:
             errors.append(("WARN", f"账户 '{account}' 未在 account-list.md 注册 (拼写错误? 或需添加)"))
 
-    elif tx_type == "transfer":
-        from_acc = fm.get("from_account")
-        to_acc = fm.get("to_account")
+    elif tx_type in ("transfer-out", "transfer-in"):
+        # V1.4: out 文件 account=转出方, to_account=转入方; in 文件反之
+        #       配对时还原出 from (out.account) / to (out.to_account) 与 in 端 (in.account=转入方, in.to_account=转出方) 比对
+        this_account = fm.get("account")
+        to_account = fm.get("to_account")
         pair_id = fm.get("transfer_pair_id")
 
-        if not from_acc or not to_acc:
-            errors.append(("ERROR", "transfer 必须有 from_account 和 to_account"))
-        elif from_acc == to_acc:
-            errors.append(("ERROR", f"transfer 双方账户相同: {from_acc}"))
+        if not this_account or not to_account:
+            errors.append(("ERROR", "transfer-out/transfer-in 必须有 account 和 to_account 字段"))
+        elif this_account == to_account:
+            errors.append(("ERROR", f"transfer 双方账户相同: {this_account}"))
 
-        if from_acc and from_acc not in registered:
-            errors.append(("WARN", f"转出账户 '{from_acc}' 未在 account-list.md 注册"))
-        if to_acc and to_acc not in registered:
-            errors.append(("WARN", f"转入账户 '{to_acc}' 未在 account-list.md 注册"))
+        if this_account and this_account not in registered:
+            errors.append(("WARN", f"本端账户 '{this_account}' 未在 account-list.md 注册"))
+        if to_account and to_account not in registered:
+            errors.append(("WARN", f"对端账户 '{to_account}' 未在 account-list.md 注册"))
 
         if not pair_id:
-            errors.append(("ERROR", "transfer 必须有 transfer_pair_id"))
+            errors.append(("ERROR", "transfer-out/transfer-in 必须有 transfer_pair_id"))
         else:
             # 7. 找配对
             direction = "out" if "/transfers/out/" in filepath else (
@@ -149,11 +154,66 @@ def validate(filepath: str, vault_root: str) -> list:
                         errors.append(
                             ("ERROR", f"配对文件 currency 不一致: {os.path.basename(pf)} 有 {pfm.get('currency')}, 当前有 {currency}")
                         )
-                    # from/to 必须完全一致 (out 和 in 表达同一笔交易, 语义统一)
+                    # 配对语义: out.account (转出方) == in.to_account (对端) 且 out.to_account (转入方) == in.account (本端)
+                    if direction == "out":
+                        expected_other_account = to_account   # 期望 in 端的 account = out.to_account
+                        expected_other_to_account = this_account  # 期望 in 端的 to_account = out.account
+                    else:  # direction == "in"
+                        expected_other_account = to_account   # 期望 out 端的 account = in.to_account
+                        expected_other_to_account = this_account  # 期望 out 端的 to_account = in.account
+
+                    other_account = pfm.get("account")
+                    other_to_account = pfm.get("to_account")
+                    if other_account != expected_other_account or other_to_account != expected_other_to_account:
+                        errors.append((
+                            "ERROR",
+                            f"配对文件账户不一致: {os.path.basename(pf)} 是 {other_account}→{other_to_account}, "
+                            f"当前是 {this_account}→{to_account}",
+                        ))
+
+    elif tx_type == "transfer":
+        # V1.3 老格式 (vault 里 2026-06-03 那笔 320 是这种): type=transfer + from_account + to_account
+        # out/in 文件 frontmatter 字段完全一致, 不拆 type
+        from_acc = fm.get("from_account")
+        to_acc = fm.get("to_account")
+        pair_id = fm.get("transfer_pair_id")
+
+        if not from_acc or not to_acc:
+            errors.append(("ERROR", "transfer (V1.3 老格式) 必须有 from_account 和 to_account"))
+        elif from_acc == to_acc:
+            errors.append(("ERROR", f"transfer 双方账户相同: {from_acc}"))
+
+        if from_acc and from_acc not in registered:
+            errors.append(("WARN", f"转出账户 '{from_acc}' 未在 account-list.md 注册"))
+        if to_acc and to_acc not in registered:
+            errors.append(("WARN", f"转入账户 '{to_acc}' 未在 account-list.md 注册"))
+
+        if not pair_id:
+            errors.append(("ERROR", "transfer 必须有 transfer_pair_id"))
+        else:
+            # 找配对 (老格式 out/in frontmatter 一致, 找另一个文件即可)
+            direction = "out" if "/transfers/out/" in filepath else (
+                "in" if "/transfers/in/" in filepath else None
+            )
+            pair_files = find_transfer_pair(vault_root, pair_id, direction=None)
+            other_files = [f for f in pair_files if os.path.abspath(f) != os.path.abspath(filepath)]
+
+            if not other_files:
+                errors.append(("ERROR", f"transfer_pair_id '{pair_id}' 找不到配对文件"))
+            else:
+                for pf in other_files:
+                    pfm, _ = parse_frontmatter(pf)
+                    if float(pfm.get("amount", 0)) != float(amount):
+                        errors.append(("ERROR", f"配对文件 amount 不一致: {os.path.basename(pf)} 有 {pfm.get('amount')}, 当前有 {amount}"))
+                    if pfm.get("currency") != currency:
+                        errors.append(("ERROR", f"配对文件 currency 不一致: {os.path.basename(pf)} 有 {pfm.get('currency')}, 当前有 {currency}"))
+                    # 老格式: out/in 的 from/to 必须完全一致
                     if from_acc != pfm.get("from_account") or to_acc != pfm.get("to_account"):
-                        errors.append(
-                            ("ERROR", f"配对文件账户不一致: {os.path.basename(pf)} 是 {pfm.get('from_account')}→{pfm.get('to_account')}, 当前是 {from_acc}→{to_acc}")
-                        )
+                        errors.append((
+                            "ERROR",
+                            f"配对文件账户不一致: {os.path.basename(pf)} 是 {pfm.get('from_account')}→{pfm.get('to_account')}, "
+                            f"当前是 {from_acc}→{to_acc}",
+                        ))
 
     return errors
 

@@ -58,7 +58,7 @@ triggers:
   - balance
   - 余额
   - 账户
-version: V1.4.1
+version: V1.4.2
 # V1.3 = V1.2.1 (远端) + V1.1.3 余额快照 (本地) + V1.1.5 字段重设计 (本地, cherry-pick 整合)
 # 远端 V1.2: 贷款字段 4 列 + reminder + monthly_summary 进度段
 # 远端 V1.2.1: scripts/ 安装文档
@@ -94,6 +94,13 @@ version: V1.4.1
 #   顺手: V1.4 ship 时 hermes+aweskill 跟 github balance.py 实际已不一致, 这次 3 端 SHA 全部对齐
 #   Vault reproduce 修后: A=13128.28, B=13128.28, 差=0 ✅
 #   daily 重跑: 0 ERROR, 3 WARN (贷款账户遗忘, 老问题跟余额无关)
+# V1.4.2: 修 3 个 V1.4 ship 漏改的 transfer 字段 bug (validate + daily integrity)
+#   Bug A: validate_transaction.py type 白名单不认 transfer-out/transfer-in, V1.4 transfer 文件校验永远失败
+#   Bug B: daily_integrity_check.py 配对字段还认 from_account/to_account, V1.4 配对检查永远报 None→XXX
+#   Bug C: daily_integrity_check.py check_balances_self_consistent 不认 V1.4 transfer, transfer 静默跳过累加, 路径 A vs B 漂移
+#   修: 加 V1.3/V1.4 双兼容分支 (vault 里两种格式共存, 都得能跑)
+#   兼容性: 老 V1.3 type=transfer + from_account/to_account 继续工作 (V1.4.1 已修 compute_balances 兼容老格式)
+#   验证: 6/6 新 V1.4 transfer 文件 validate 全过, 1/1 老 V1.3 320 也过, daily 12 ERROR → 0 ERROR
 status: ACTIVE
 tags: [finance, obsidian, accounting, agent, nlp]
 author: lovepigpanda

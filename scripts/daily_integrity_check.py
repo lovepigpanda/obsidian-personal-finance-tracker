@@ -98,11 +98,25 @@ def check_transfer_pairing(vault_root: str) -> list:
                 "ERROR",
                 f"transfer 配对币种不一致 (pair_id={pair_id}): out={ofm.get('currency')}, in={ifm.get('currency')}",
             ))
-        # out 和 in 的 from/to 必须完全一致 (同一笔交易, 语义统一)
-        if ofm.get("from_account") != ifm.get("from_account") or ofm.get("to_account") != ifm.get("to_account"):
+        # V1.3 老格式 (out/in frontmatter 一致) + V1.4 新格式 (out/in 互补) 两种都要能比对
+        # V1.3: out/from_account, out/to_account, in/from_account, in/to_account 都直接拿
+        # V1.4: out 端 from = out.account, to = out.to_account; in 端 from = in.to_account, to = in.account
+        if ofm.get("type") == "transfer":
+            # V1.3 老格式
+            out_from = ofm.get("from_account")
+            out_to = ofm.get("to_account")
+            in_from = ifm.get("from_account")
+            in_to = ifm.get("to_account")
+        else:
+            # V1.4 新格式
+            out_from = ofm.get("account")
+            out_to = ofm.get("to_account")
+            in_from = ifm.get("to_account")
+            in_to = ifm.get("account")
+        if out_from != in_from or out_to != in_to:
             errors.append((
                 "ERROR",
-                f"transfer 配对账户不一致 (pair_id={pair_id}): out 是 {ofm.get('from_account')}→{ofm.get('to_account')}, in 是 {ifm.get('from_account')}→{ifm.get('to_account')}",
+                f"transfer 配对账户不一致 (pair_id={pair_id}): out 是 {out_from}→{out_to}, in 是 {in_from}→{in_to}",
             ))
 
     return errors
@@ -156,6 +170,16 @@ def check_balances_self_consistent(vault_root: str) -> list:
             if acc:
                 expected[(acc, ccy)] -= amount
         elif tx_type == "income":
+            acc = fm.get("account")
+            if acc:
+                expected[(acc, ccy)] += amount
+        elif tx_type == "transfer-out":
+            # V1.4: out 文件 account = 转出方, to_account = 转入方
+            acc = fm.get("account")
+            if acc:
+                expected[(acc, ccy)] -= amount
+        elif tx_type == "transfer-in":
+            # V1.4: in 文件 account = 转入方, to_account = 转出方
             acc = fm.get("account")
             if acc:
                 expected[(acc, ccy)] += amount
