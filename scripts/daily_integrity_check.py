@@ -319,7 +319,8 @@ def check_account_inactivity(vault_root: str, days: int = 14) -> list:
         ccy = fm.get("currency", "CNY")
         tx_type = fm.get("type")
 
-        if tx_type in ("expense", "income"):
+        if tx_type in ("expense", "income", "transfer-out", "transfer-in"):
+            # V1.4: transfer-out/in 用 account 字段 (本端), V1.3 老 transfer 用 from_account/to_account
             acc = fm.get("account")
             if acc:
                 key = (acc, ccy)
